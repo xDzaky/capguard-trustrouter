@@ -10,11 +10,15 @@ import {
   type RoutedExecution,
   type CrossValidation,
   type OnChainProof,
+  type SlaGuard,
+  type ConsensusResult,
   type CandidateAgentConfig,
   type OperatingMode,
   BuyerRequestSchema,
   CandidateDeliverySchema,
   calculateTrustScore,
+  calculateSlaGuard,
+  calculateConsensus,
   selectBestCandidate,
   calculateStats,
   generateId,
@@ -477,11 +481,47 @@ export class TrustRouterOrchestrator {
     const eventLogs = database.getEventLogs(ctx.jobId);
     const executionLogHash = hashExecutionLog(eventLogs);
 
-    // Route-and-execute if requested
+    // ─── SLA-Gated Safe Routing ───────────────────────────────────────────
+    // Filter candidates by SLA, schema, proof, and score thresholds.
+    // CAPGuard only routes execution to agents that pass ALL gates.
+    // This controls routing decisions — NOT fund escrow or release.
+    const slaGuard = calculateSlaGuard(results, recommended_service_id);
+
+    database.addEventLog(ctx.jobId, {
+      event: "SlaGuardEvaluated",
+      actor: "trustrouter",
+      details: `route_allowed=${slaGuard.route_allowed} winner_passed=${slaGuard.winner_passed_gate} blocked=${slaGuard.blocked_agents.length}`,
+    });
+
+    if (slaGuard.blocked_agents.length > 0) {
+      logger.info(
+        { jobId: ctx.jobId, blocked: slaGuard.blocked_agents.map((b) => `${b.agent_name}[${b.reasons.join(",")}]`) },
+        "🚦 SLA Guard: some agents blocked from routing"
+      );
+    }
+
+    // ─── Consensus Scoring ────────────────────────────────────────────────
+    // Measure agreement across candidate deliveries via keyword similarity.
+    const consensus = calculateConsensus(results);
+    database.addEventLog(ctx.jobId, {
+      event: "ConsensusScored",
+      actor: "trustrouter",
+      details: `agreement=${consensus.agreement_score}% outliers=${consensus.outlier_agents.length}`,
+    });
+
+    // ─── Route-and-execute (only if winner passed SLA gate) ───────────────
     let routedExecution: RoutedExecution;
-    if (ctx.autoRoute && recommended_service_id) {
+    const shouldRoute = ctx.autoRoute && recommended_service_id !== "none" && slaGuard.winner_passed_gate;
+
+    if (shouldRoute) {
       routedExecution = await this.performRoutedExecution(ctx, recommended_service_id);
     } else {
+      const skipReason = !ctx.autoRoute
+        ? "auto-route not requested"
+        : recommended_service_id === "none"
+        ? "no winner found"
+        : "winner did not pass SLA gate";
+
       routedExecution = {
         enabled: false,
         winner_service_id: recommended_service_id,
@@ -490,14 +530,23 @@ export class TrustRouterOrchestrator {
         status: "skipped",
         latency_ms: 0,
       };
+
+      if (ctx.autoRoute && !slaGuard.winner_passed_gate) {
+        logger.warn(
+          { jobId: ctx.jobId, winner: recommended_service_id, reasons: slaGuard.blocked_agents.find((b) => b.service_id === recommended_service_id)?.reasons },
+          "🚦 SLA Guard blocked route-and-execute — winner did not pass quality gate"
+        );
+        database.addEventLog(ctx.jobId, {
+          event: "RoutingBlocked",
+          actor: "trustrouter",
+          target: recommended_service_id,
+          details: `SLA gate blocked routing: ${skipReason}`,
+        });
+      }
     }
 
     // ─── 4th Level A2A: Cross-Validation ─────────────────────────────────
-    // Runner-up agent verifies the winner's delivery for independent validation
     const crossValidation = await this.performCrossValidation(ctx, results, recommended_service_id);
-
-    // ─── On-Chain Proof Anchoring ────────────────────────────────────────
-    // Anchor report hash on Base chain for immutable verification
     const a2aDepth = crossValidation.enabled && crossValidation.status === "completed" ? 4 : 3;
 
     const baseReport: Omit<TrustReport, "report_hash"> = {
@@ -517,7 +566,10 @@ export class TrustRouterOrchestrator {
         contract_address: process.env.PROOF_CONTRACT_ADDRESS || "",
         report_hash: "",
         timestamp: new Date().toISOString(),
+        note: "On-chain anchoring available when PROOF_CONTRACT_ADDRESS is configured",
       },
+      sla_guard: slaGuard,
+      consensus,
       execution_log_hash: executionLogHash,
       generated_at: new Date().toISOString(),
       ...stats,
@@ -532,11 +584,19 @@ export class TrustRouterOrchestrator {
     try {
       const proof = await this.anchorProofOnChain(reportHash, ctx.jobId);
       report.on_chain_proof = proof;
-      database.addEventLog(ctx.jobId, {
-        event: "OnChainProofAnchored",
-        actor: "trustrouter",
-        details: `tx: ${proof.tx_hash}, block: ${proof.block_number}`,
-      });
+      if (proof.anchored) {
+        database.addEventLog(ctx.jobId, {
+          event: "OnChainProofAnchored",
+          actor: "trustrouter",
+          details: `tx: ${proof.tx_hash}, block: ${proof.block_number}`,
+        });
+      } else {
+        database.addEventLog(ctx.jobId, {
+          event: "OnChainProofSkipped",
+          actor: "trustrouter",
+          details: proof.note ?? "Not configured",
+        });
+      }
     } catch (e: any) {
       logger.warn({ error: e.message }, "⚠️ On-chain proof anchoring failed (non-critical)");
       database.addEventLog(ctx.jobId, {
@@ -665,40 +725,111 @@ export class TrustRouterOrchestrator {
   }
 
   // ─── On-Chain Proof Anchoring ────────────────────────────────────────────
-  // Store report hash on Base blockchain for immutable verification
+  // Stores report hash on Base blockchain for immutable verification.
+  //
+  // IMPORTANT: This method NEVER fabricates a tx_hash.
+  // If PROOF_CONTRACT_ADDRESS + PROOF_SIGNER_PRIVATE_KEY are not set,
+  // it returns anchored=false with a transparency note.
+  // If they are set, it calls the deployed contract via viem.
 
   private async anchorProofOnChain(reportHash: string, jobId: string): Promise<OnChainProof> {
-    const rpcUrl = process.env.BASE_RPC_URL || "https://mainnet.base.org";
     const contractAddress = process.env.PROOF_CONTRACT_ADDRESS;
     const privateKey = process.env.PROOF_SIGNER_PRIVATE_KEY;
+    const rpcUrl = process.env.BASE_RPC_URL || "https://mainnet.base.org";
 
+    // Case 1: Not configured — return unanchored proof with transparency note
     if (!contractAddress || !privateKey) {
-      // On-chain anchoring not configured — return unanchored proof
-      logger.info("On-chain proof anchoring not configured (set PROOF_CONTRACT_ADDRESS + PROOF_SIGNER_PRIVATE_KEY)");
+      logger.info(
+        "⛓️  On-chain proof: not configured (set PROOF_CONTRACT_ADDRESS + PROOF_SIGNER_PRIVATE_KEY for real anchoring)"
+      );
       return {
         anchored: false,
         chain: "base",
         tx_hash: "",
         block_number: 0,
-        contract_address: contractAddress || "",
+        contract_address: "",
         report_hash: reportHash,
         timestamp: new Date().toISOString(),
+        note: "On-chain anchoring available when PROOF_CONTRACT_ADDRESS and PROOF_SIGNER_PRIVATE_KEY are configured. Report hash is cryptographically verifiable off-chain.",
       };
     }
 
-    // In production, this would call the deployed smart contract:
-    // contract.anchorProof(reportHash, jobId, timestamp)
-    // For hackathon, we log the intent and return a structured proof
-    logger.info({ reportHash: reportHash.slice(0, 20), jobId }, "⛓️ Anchoring proof on Base chain");
+    // Case 2: Configured — call real Base contract via viem
+    try {
+      logger.info({ reportHash: reportHash.slice(0, 20), jobId }, "⛓️  Anchoring proof on Base via viem");
 
-    return {
-      anchored: true,
-      chain: "base",
-      tx_hash: `0x${Buffer.from(reportHash + jobId).toString("hex").slice(0, 64)}`,
-      block_number: Math.floor(Date.now() / 1000),
-      contract_address: contractAddress,
-      report_hash: reportHash,
-      timestamp: new Date().toISOString(),
-    };
+      // Dynamic import with fallback if viem is not installed
+      let viemImport: any, chainsImport: any, accountsImport: any;
+      try {
+        viemImport = await import("viem" as any);
+        chainsImport = await import("viem/chains" as any);
+        accountsImport = await import("viem/accounts" as any);
+      } catch {
+        logger.warn("viem not installed — run 'npm install viem' in apps/provider to enable on-chain anchoring");
+        return {
+          anchored: false,
+          chain: "base",
+          tx_hash: "",
+          block_number: 0,
+          contract_address: contractAddress,
+          report_hash: reportHash,
+          timestamp: new Date().toISOString(),
+          note: "On-chain anchoring requires viem package. Run: npm install viem. Report hash is verifiable off-chain.",
+        };
+      }
+
+      const { createWalletClient, createPublicClient, http, parseAbi } = viemImport;
+      const { base } = chainsImport;
+      const { privateKeyToAccount } = accountsImport;
+
+      const account = privateKeyToAccount(privateKey as `0x${string}`);
+      const publicClient = createPublicClient({ chain: base, transport: http(rpcUrl) });
+      const walletClient = createWalletClient({ chain: base, account, transport: http(rpcUrl) });
+
+      const abi = parseAbi([
+        "function anchorProof(bytes32 reportHash, string calldata jobId) external",
+      ]);
+
+      const reportHashBytes32 = `0x${reportHash.padEnd(64, "0").slice(0, 64)}` as `0x${string}`;
+
+      const txHash = await walletClient.writeContract({
+        address: contractAddress as `0x${string}`,
+        abi,
+        functionName: "anchorProof",
+        args: [reportHashBytes32, jobId],
+      });
+
+      const receipt = await publicClient.waitForTransactionReceipt({ hash: txHash });
+
+      logger.info(
+        { txHash, blockNumber: receipt.blockNumber.toString() },
+        "✅ On-chain proof anchored on Base"
+      );
+
+      return {
+        anchored: true,
+        chain: "base",
+        tx_hash: txHash,
+        block_number: Number(receipt.blockNumber),
+        contract_address: contractAddress,
+        report_hash: reportHash,
+        timestamp: new Date().toISOString(),
+        note: `Anchored on Base at block ${receipt.blockNumber}`,
+      };
+    } catch (error: any) {
+      logger.error({ error: error.message }, "❌ On-chain anchoring failed");
+      return {
+        anchored: false,
+        chain: "base",
+        tx_hash: "",
+        block_number: 0,
+        contract_address: contractAddress,
+        report_hash: reportHash,
+        timestamp: new Date().toISOString(),
+        note: `Anchoring attempted but failed: ${error.message}. Report hash remains verifiable off-chain.`,
+      };
+    }
   }
 }
+
+

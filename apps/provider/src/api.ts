@@ -270,6 +270,134 @@ app.get("/api/a2a-depth", (_req, res) => {
   });
 });
 
+// ─── Evidence Endpoint ───────────────────────────────────────────────────────
+// Public endpoint for judges to verify CAPGuard's real activity.
+// Returns agent store listings, order counts, report hashes, verify URLs,
+// SLA gate examples, consensus examples, and cross-validation evidence.
+
+app.get("/api/evidence", (_req, res) => {
+  try {
+    const stats = database.getStats();
+    const dashboardJobs = database.getDashboardJobs();
+
+    // Collect all completed jobs with full reports via getJob
+    const completedJobs = dashboardJobs
+      .filter((j) => j.status === "completed")
+      .slice(0, 15)
+      .map((j) => database.getJob(j.id))
+      .filter((j): j is NonNullable<typeof j> => j != null && j.trust_report != null);
+
+    // Extract report hashes, verify URLs, and SLA guard examples
+    const reportHashes: string[] = [];
+    const verifyUrls: string[] = [];
+    const slaGuardExamples: object[] = [];
+    const crossValidationExamples: object[] = [];
+    const consensusExamples: object[] = [];
+    const onChainExamples: object[] = [];
+
+    for (const job of completedJobs.slice(0, 10)) {
+      const report = job.trust_report;
+      if (!report) continue;
+
+      if (report.report_hash) {
+        reportHashes.push(report.report_hash);
+        verifyUrls.push(`/api/verify/${report.report_hash}`);
+      }
+
+      if (report.sla_guard?.blocked_agents?.length > 0) {
+        slaGuardExamples.push({
+          job_id: job.id,
+          route_allowed: report.sla_guard.route_allowed,
+          winner_passed_gate: report.sla_guard.winner_passed_gate,
+          blocked_count: report.sla_guard.blocked_agents.length,
+          blocked_agents: report.sla_guard.blocked_agents,
+        });
+      }
+
+      if (report.cross_validation?.status === "completed") {
+        crossValidationExamples.push({
+          job_id: job.id,
+          validator: report.cross_validation.validator_agent_name,
+          validation_score: report.cross_validation.validation_score,
+          summary: report.cross_validation.validation_summary?.slice(0, 100),
+        });
+      }
+
+      if (report.consensus?.enabled) {
+        consensusExamples.push({
+          job_id: job.id,
+          agreement_score: report.consensus.agreement_score,
+          outlier_count: report.consensus.outlier_agents.length,
+          summary: report.consensus.majority_summary?.slice(0, 100),
+        });
+      }
+
+      if (report.on_chain_proof?.anchored) {
+        onChainExamples.push({
+          job_id: job.id,
+          tx_hash: report.on_chain_proof.tx_hash,
+          block_number: report.on_chain_proof.block_number,
+          chain: report.on_chain_proof.chain,
+        });
+      }
+    }
+
+    // Agent Store listings from env config
+    const agentStoreListings: Record<string, string> = {};
+    const capguardId = process.env.CROO_SERVICE_ID_CAPGUARD;
+    if (capguardId) {
+      agentStoreListings["capguard"] = `https://agent.croo.network/agents/${capguardId}`;
+    }
+    const targetIds = (process.env.CROO_TARGET_SERVICE_IDS || "").split(",").filter(Boolean);
+    const agentNames = ["research_alpha", "verify_beta", "format_gamma"];
+    targetIds.forEach((id, i) => {
+      const name = agentNames[i] ?? `agent_${i + 1}`;
+      agentStoreListings[name] = `https://agent.croo.network/agents/${id.trim()}`;
+    });
+
+    res.json({
+      generated_at: new Date().toISOString(),
+      mode: process.env.STRICT_CAP_MODE === "true" ? "STRICT_CAP" : process.env.DEMO_MODE === "true" ? "DEMO" : "DEFAULT",
+      agent_store_listings: agentStoreListings,
+      architecture: {
+        a2a_depth: 4,
+        sla_gated_routing: true,
+        consensus_scoring: true,
+        cross_validation: true,
+        on_chain_proof: "available when PROOF_CONTRACT_ADDRESS configured",
+      },
+      stats: {
+        total_jobs: stats.total_jobs,
+        completed_jobs: stats.completed_jobs,
+        total_sub_orders: stats.total_sub_orders,
+        total_cap_transactions: stats.total_cap_transactions,
+        average_trust_score: stats.average_trust_score,
+        unique_counterparties: stats.unique_counterparties,
+        unique_buyer_wallets: stats.unique_buyer_wallets,
+      },
+      report_hashes: reportHashes.slice(0, 10),
+      verify_urls: verifyUrls.slice(0, 10),
+      sla_guard_examples: slaGuardExamples.slice(0, 5),
+      cross_validation_examples: crossValidationExamples.slice(0, 5),
+      consensus_examples: consensusExamples.slice(0, 5),
+      on_chain_anchor_examples: onChainExamples.slice(0, 5),
+      latest_jobs: completedJobs.slice(0, 5).map((j) => ({
+        job_id: j.id,
+        status: j.status,
+        created_at: j.created_at,
+        candidates_evaluated: j.trust_report?.total_candidates ?? 0,
+        winner: j.trust_report?.recommended_service_id ?? "none",
+        avg_score: j.trust_report?.average_score ?? 0,
+        sla_gate_passed: j.trust_report?.sla_guard?.winner_passed_gate ?? false,
+        consensus_score: j.trust_report?.consensus?.agreement_score ?? 0,
+      })),
+    });
+  } catch (error: any) {
+    logger.error({ error: error.message }, "Failed to get evidence");
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export function startApiServer(port: number = 3001) {
   app.listen(port, () => {
     logger.info({ port }, "📊 Dashboard API server running");
@@ -278,3 +406,4 @@ export function startApiServer(port: number = 3001) {
 }
 
 export default app;
+

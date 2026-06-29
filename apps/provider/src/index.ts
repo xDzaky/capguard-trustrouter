@@ -44,10 +44,20 @@ async function main() {
         };
 
         providerClient = new AgentClient(config, apiKey);
-        executorClient = new AgentClient(
-          config,
-          process.env.CROO_SDK_KEY_EXECUTOR || apiKey
-        );
+
+        // ─── Executor Client ──────────────────────────────────────────────
+        // The executor buys services from candidate agents on behalf of CAPGuard.
+        // It MUST use the CAPGuard provider key (NOT a candidate agent key) so
+        // that CROO does not reject it as "cannot negotiate own service".
+        // Executor uses HTTP-only (no WebSocket) to avoid "duplicate key" error
+        // since the provider already holds the WebSocket connection on this key.
+        const executorKey = process.env.CROO_SDK_KEY_EXECUTOR || apiKey;
+        // If executor key equals provider key, we can't open another WS.
+        // We create the client the same way — SDK HTTP calls don't need WS open.
+        executorClient = new AgentClient(config, executorKey);
+        // NOTE: We intentionally do NOT call executorClient.connectWebSocket().
+        // All executor operations (negotiate, pay, getOrder, getDelivery) are
+        // REST HTTP calls and work without a WebSocket connection.
 
         logger.info("✅ Connected to CROO SDK");
 

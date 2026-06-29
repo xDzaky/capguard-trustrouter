@@ -72,6 +72,30 @@ export const TrustReportSchema = z.object({
     contract_address: z.string(),
     report_hash: z.string(),
     timestamp: z.string(),
+    note: z.string().optional(),
+  }),
+  sla_guard: z.object({
+    enabled: z.boolean(),
+    min_route_score: z.number(),
+    require_schema_valid: z.boolean(),
+    require_proof_present: z.boolean(),
+    require_sla_passed: z.boolean(),
+    route_allowed: z.boolean(),
+    winner_passed_gate: z.boolean(),
+    blocked_agents: z.array(
+      z.object({
+        service_id: z.string(),
+        agent_name: z.string(),
+        reasons: z.array(z.string()),
+      })
+    ),
+  }),
+  consensus: z.object({
+    enabled: z.boolean(),
+    agreement_score: z.number(),
+    weighted_by_reputation: z.boolean(),
+    outlier_agents: z.array(z.string()),
+    majority_summary: z.string(),
   }),
   report_hash: z.string(),
   execution_log_hash: z.string(),

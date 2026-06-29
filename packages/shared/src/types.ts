@@ -63,6 +63,36 @@ export interface OnChainProof {
   contract_address: string;
   report_hash: string;
   timestamp: string;
+  note?: string; // Transparency note explaining anchoring status
+}
+
+/**
+ * SLA-Gated Safe Routing result.
+ * CAPGuard only routes final execution to agents that pass all gates.
+ * This is NOT an escrow — it controls routing decision, not fund release.
+ */
+export interface SlaGuard {
+  enabled: boolean;
+  min_route_score: number;      // Minimum score required to be routed (e.g. 80)
+  require_schema_valid: boolean;
+  require_proof_present: boolean;
+  require_sla_passed: boolean;
+  route_allowed: boolean;       // Whether any agent passed the gate
+  winner_passed_gate: boolean;  // Whether the winner specifically passed
+  blocked_agents: {
+    service_id: string;
+    agent_name: string;
+    reasons: string[]; // "schema_invalid" | "sla_failed" | "proof_missing" | "score_below_threshold"
+  }[];
+}
+
+/** Consensus scoring across candidate deliveries */
+export interface ConsensusResult {
+  enabled: boolean;
+  agreement_score: number;      // 0-100: how much candidates agree
+  weighted_by_reputation: boolean;
+  outlier_agents: string[];     // service_ids whose answers diverge
+  majority_summary: string;     // Human-readable consensus outcome
 }
 
 /** Historical reputation data for an agent */
@@ -92,6 +122,8 @@ export interface TrustReport {
   routed_execution: RoutedExecution;
   cross_validation: CrossValidation;
   on_chain_proof: OnChainProof;
+  sla_guard: SlaGuard;         // SLA-gated routing decision
+  consensus: ConsensusResult;  // Consensus scoring across candidates
   report_hash: string;
   execution_log_hash: string;
   generated_at: string;
