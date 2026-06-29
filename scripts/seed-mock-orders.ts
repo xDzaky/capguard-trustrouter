@@ -133,6 +133,7 @@ for (let i = 0; i < SAMPLE_INTENTS.length; i++) {
       latency_ms: Math.round(latencyMs),
       delivery_consistency: consistent,
       score,
+      retries: 0,
     };
   });
 
@@ -146,6 +147,14 @@ for (let i = 0; i < SAMPLE_INTENTS.length; i++) {
     candidate_agents: candidateResults,
     recommended_service_id,
     recommended_reason,
+    routed_execution: {
+      enabled: false,
+      winner_service_id: recommended_service_id,
+      winner_order_id: "",
+      winner_delivery_hash: "",
+      status: "skipped" as const,
+      latency_ms: 0,
+    },
     report_hash: "",
     execution_log_hash: hashExecutionLog(eventLogs),
     generated_at: createdAt,
@@ -155,7 +164,7 @@ for (let i = 0; i < SAMPLE_INTENTS.length; i++) {
     average_score: Math.round(candidateResults.reduce((a, b) => a + b.score, 0) / candidateResults.length),
   };
 
-  report.report_hash = hashReport(report);
+  report.report_hash = hashReport(report as any);
 
   database.completeJob(jobId, report as any);
 

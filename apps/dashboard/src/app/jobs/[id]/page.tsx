@@ -72,22 +72,55 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           </div>
         </section>
 
-        {/* Recommendation */}
+        {/* Recommendation & Routed Execution */}
         {report && (
-          <section className="croo-card p-8 mb-12 border-l-4 border-l-brand-lime">
-            <div className="flex items-start gap-4">
-              <div className="w-12 h-12 rounded-2xl bg-brand-lime/20 flex items-center justify-center flex-shrink-0">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#A3FF12" strokeWidth="2">
-                  <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                </svg>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-12">
+            <section className="croo-card p-8 border-l-4 border-l-brand-lime">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-brand-lime/20 flex items-center justify-center flex-shrink-0">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#A3FF12" strokeWidth="2">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-brand-lime uppercase tracking-widest mb-1">Routing Recommendation</h3>
+                  <p className="text-xl font-bold text-brand-dark mb-1">{report.recommended_service_id}</p>
+                  <p className="text-sm text-brand-muted">{report.recommended_reason}</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-xs font-bold text-brand-lime uppercase tracking-widest mb-1">Routing Recommendation</h3>
-                <p className="text-xl font-bold text-brand-dark mb-1">{report.recommended_service_id}</p>
-                <p className="text-sm text-brand-muted">{report.recommended_reason}</p>
+            </section>
+
+            <section className="croo-card p-8 border-l-4 border-l-blue-500">
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 rounded-2xl bg-blue-50 flex items-center justify-center flex-shrink-0 text-blue-500">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-xs font-bold text-blue-500 uppercase tracking-widest mb-1">Routed Execution (Level 3 A2A)</h3>
+                  {report.routed_execution?.enabled ? (
+                    <div>
+                      <p className="text-xl font-bold text-brand-dark mb-1">
+                        {report.routed_execution.status === "completed" ? "✓ Completed" : "✗ Failed"}
+                      </p>
+                      <p className="text-xs text-brand-muted truncate">
+                        Order ID: <span className="font-mono font-semibold text-brand-dark">{report.routed_execution.winner_order_id || "none"}</span>
+                      </p>
+                      <p className="text-xs text-brand-muted truncate">
+                        Delivery Hash: <span className="font-mono text-brand-dark">{report.routed_execution.winner_delivery_hash || "none"}</span>
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-xl font-bold text-brand-dark mb-1">Skipped</p>
+                      <p className="text-sm text-brand-muted">Auto-route not requested by buyer</p>
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          </section>
+            </section>
+          </div>
         )}
 
         {/* Candidate Agents */}
