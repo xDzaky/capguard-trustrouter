@@ -1,0 +1,10 @@
+{
+  "name": "CAPGuard TrustRouter",
+  "short_name": "TrustRouter",
+  "description": "Paid CAP-native trust-and-routing agent for CROO Agent Store",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0e1a",
+  "theme_color": "#06d6a0",
+  "icons": []
+}

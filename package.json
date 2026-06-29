@@ -1,0 +1,27 @@
+{
+  "name": "capguard-trustrouter",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CAPGuard TrustRouter — Paid CAP-native trust-and-routing agent for CROO Agent Store",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:dashboard": "npm --workspace apps/dashboard run dev",
+    "dev:provider": "npx tsx apps/provider/src/index.ts",
+    "dev:mock-agents": "npx tsx apps/mock-agents/src/index.ts",
+    "dev": "concurrently \"npm run dev:dashboard\" \"npm run dev:provider\"",
+    "build:dashboard": "npm --workspace apps/dashboard run build",
+    "seed": "npx tsx scripts/seed-mock-orders.ts",
+    "simulate": "npx tsx scripts/simulate-buyers.ts",
+    "lint": "npm --workspace apps/dashboard run lint",
+    "typecheck": "tsc --noEmit -p apps/provider/tsconfig.json"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
