@@ -3,7 +3,6 @@
 // Each agent connects with its own SDK key and responds to incoming CAP orders.
 
 import "dotenv/config";
-import "dotenv/config";
 
 const logger = {
   info: (...args: any[]) => console.log("[candidate-agents]", ...args),
@@ -86,11 +85,13 @@ async function startCandidateAgents() {
     try {
       logger.info(`🔗 Connecting ${agent.name} (service: ${agent.serviceId})`);
 
-      const client = new AgentClient({
-        apiKey: agent.sdkKey,
+      const config = {
         baseURL: process.env.CROO_API_URL || "https://api.croo.network",
         wsURL: process.env.CROO_WS_URL || "wss://api.croo.network/ws",
-      });
+        rpcURL: process.env.BASE_RPC_URL || "https://mainnet.base.org",
+      };
+
+      const client = new AgentClient(config, agent.sdkKey);
 
       await client.connectWebSocket();
 
