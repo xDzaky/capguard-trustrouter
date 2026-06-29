@@ -54,6 +54,25 @@ export const TrustReportSchema = z.object({
     status: z.enum(["completed", "failed", "skipped"]),
     latency_ms: z.number(),
   }),
+  cross_validation: z.object({
+    enabled: z.boolean(),
+    validator_service_id: z.string(),
+    validator_agent_name: z.string(),
+    validator_order_id: z.string(),
+    validation_score: z.number(),
+    validation_summary: z.string(),
+    status: z.enum(["completed", "failed", "skipped"]),
+    latency_ms: z.number(),
+  }),
+  on_chain_proof: z.object({
+    anchored: z.boolean(),
+    chain: z.string(),
+    tx_hash: z.string(),
+    block_number: z.number(),
+    contract_address: z.string(),
+    report_hash: z.string(),
+    timestamp: z.string(),
+  }),
   report_hash: z.string(),
   execution_log_hash: z.string(),
   generated_at: z.string(),
@@ -61,6 +80,7 @@ export const TrustReportSchema = z.object({
   completed_candidates: z.number(),
   failed_candidates: z.number(),
   average_score: z.number(),
+  a2a_depth: z.number(),
 });
 
 /** Schema for event log */

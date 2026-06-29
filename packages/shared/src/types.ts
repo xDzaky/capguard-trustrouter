@@ -42,6 +42,45 @@ export interface RoutedExecution {
   latency_ms: number;
 }
 
+/** Cross-validation result — 4th level A2A: runner-up verifies winner's delivery */
+export interface CrossValidation {
+  enabled: boolean;
+  validator_service_id: string;
+  validator_agent_name: string;
+  validator_order_id: string;
+  validation_score: number; // 0-100: how much the validator agrees with winner
+  validation_summary: string;
+  status: "completed" | "failed" | "skipped";
+  latency_ms: number;
+}
+
+/** On-chain proof anchor for immutable verification */
+export interface OnChainProof {
+  anchored: boolean;
+  chain: string; // "base"
+  tx_hash: string;
+  block_number: number;
+  contract_address: string;
+  report_hash: string;
+  timestamp: string;
+}
+
+/** Historical reputation data for an agent */
+export interface AgentReputation {
+  service_id: string;
+  agent_name: string;
+  total_evaluations: number;
+  average_score: number;
+  completion_rate: number;
+  avg_latency_ms: number;
+  sla_compliance_rate: number;
+  source_inclusion_rate: number;
+  first_seen: string;
+  last_seen: string;
+  score_history: { date: string; score: number }[];
+  grade: "A+" | "A" | "B+" | "B" | "C" | "D" | "F";
+}
+
 /** Trust report generated after evaluating all candidates */
 export interface TrustReport {
   report_id: string;
@@ -51,6 +90,8 @@ export interface TrustReport {
   recommended_service_id: string;
   recommended_reason: string;
   routed_execution: RoutedExecution;
+  cross_validation: CrossValidation;
+  on_chain_proof: OnChainProof;
   report_hash: string;
   execution_log_hash: string;
   generated_at: string;
@@ -58,6 +99,7 @@ export interface TrustReport {
   completed_candidates: number;
   failed_candidates: number;
   average_score: number;
+  a2a_depth: number; // 3 = base, 4 = with cross-validation
 }
 
 /** Operating mode for the provider */

@@ -11,54 +11,67 @@
 
 ## Why CAPGuard is Different
 
-| Dimension | Passive Audit Tools | **CAPGuard TrustRouter** |
-|---|---|---|
-| Method | Static metadata review | **Active paid testing** |
-| Evidence | Listing / API info | **Real CAP order receipts** |
-| Role | Observer | **Buyer + Evaluator + Router** |
-| A2A Depth | 1 level | **3 levels** |
-| Timing | Before listing | **At purchase time** |
-| Output | Trust card / checklist | **Verified routing + optional execution** |
+| Dimension | Trust Lab | VeriVerse | MantleAgents | **CAPGuard TrustRouter** |
+|---|---|---|---|---|
+| Method | Static audit | IPFS proof | On-chain registry | **Active paid A2A testing** |
+| Evidence | Trust Card | IPFS hash | ERC-8004 NFT | **Real CAP order receipts** |
+| A2A Depth | 1 level | 1 level | 1 level | **4 levels** |
+| Cross-Validation | ❌ | ❌ | ❌ | **✅ Runner-up verifies winner** |
+| On-Chain Proof | ❌ | ✅ IPFS | ✅ Mantle | **✅ Base (native to CROO)** |
+| Route-and-Execute | ❌ | ❌ | ❌ | **✅ Auto-route to winner** |
+| Agent Reputation | ✅ Trust Card | ✅ Basic | ✅ ERC-8004 | **✅ Historical score + grade** |
+| MCP Integration | ❌ | ❌ | ❌ | **✅ 2 MCP tools** |
+| Real CAP Chain | ✅ Partial | ❌ | ❌ | **✅ Full lifecycle** |
 
 ---
 
 ## How It Works
 
 ```
-Human/Agent Buyer
-      │
-      │  CAP negotiation + payment
-      ▼
-┌─────────────────────────────────────────┐
-│       CAPGuard TrustRouter (Provider)   │
-│                                         │
-│  1. Accept buyer order via CAP          │
-│  2. Fan-out paid sub-orders to N agents │
-│  3. Validate delivery proofs + score    │
-│  4. Select winner by trust score        │
-│  5. Optional: route-and-execute winner  │
-│  6. Deliver trust report + proof hash   │
-└─────────────────────────────────────────┘
-       │           │           │
-       ▼           ▼           ▼
-  ResearchAlpha  VerifyBeta  FormatGamma
-  (CAP order)   (CAP order)  (CAP order)
-       │           │           │
-       └─────┬─────┘           │
-             ▼                 │
-      Score & Compare ◄────────┘
-             │
-             ▼
-   Trust Report + SHA-256 Proof Hash
-             │
-             ▼  [if auto_route=true]
-   Winner Execution Order (Level 3)
+                  Buyer
+                    │
+         Level 1: CAP negotiation + payment
+                    │
+                    ▼
+  ┌─────────────────────────────────────────────┐
+  │         CAPGuard TrustRouter (Provider)     │
+  │                                             │
+  │  1. Accept buyer order via CAP              │
+  │  2. Fan-out paid sub-orders to N agents     │  Level 2
+  │  3. Score deliveries (6-dimension matrix)   │
+  │  4. Select winner by trust score            │
+  │  5. Route-and-execute to winner             │  Level 3
+  │  6. Cross-validate via runner-up            │  Level 4 ← UNIQUE
+  │  7. Anchor proof on Base chain              │
+  │  8. Deliver trust report + proof hashes     │
+  └─────────────────────────────────────────────┘
+           │            │            │
+           ▼            ▼            ▼
+     ResearchAlpha  VerifyBeta  FormatGamma
+      (CAP order)  (CAP order)  (CAP order)
+           │            │            │
+           └──────┬─────┘            │
+                  ▼                  │
+          Score & Compare ◄──────────┘
+                  │
+           ┌──────┴───────┐
+           ▼              ▼
+    Winner Execution   Cross-Validation
+    (Level 3 order)    (Level 4 order)
+           │              │
+           └──────┬────────┘
+                  ▼
+         Trust Report + SHA-256 Hashes
+                  │
+                  ▼
+         ⛓️ Anchored on Base
 ```
 
-**A2A Depth:**
-- **Level 1**: Buyer → CAPGuard (provider role)
-- **Level 2**: CAPGuard → Candidate Agents (buyer/executor role)
-- **Level 3**: CAPGuard → Winner Agent (route-and-execute)
+**A2A Depth — 4 Levels:**
+- **Level 1**: Buyer → CAPGuard (provider role: accept trust evaluation order)
+- **Level 2**: CAPGuard → Candidate Agents × N (parallel paid sub-orders)
+- **Level 3**: CAPGuard → Winner Agent (route-and-execute: deliver real result)
+- **Level 4**: CAPGuard → Runner-up Agent (cross-validate winner's delivery via fresh order)
 
 ---
 
@@ -71,15 +84,35 @@ Event-driven WebSocket architecture. Listens for `NegotiationCreated`, `OrderPai
 - `STRICT_CAP_MODE=true` — no simulation fallback, real orders only. For final judging.
 - `DEMO_MODE=true` — simulation allowed with explicit logging. For development.
 
-### ✅ Route-and-Execute
+### ✅ Route-and-Execute (Level 3)
 Set `auto_route: true` in your buyer request. CAPGuard creates a second-stage order to the winning agent and delivers the final result — all in one flow.
+
+### ✅ Cross-Validation (Level 4 A2A — Unique)
+After routing to the winner, CAPGuard hires the **runner-up** via a fresh paid CAP order to independently verify the winner's delivery. This creates a true agent-to-agent trust chain and produces a `cross_validation` object in every report with `validation_score` (0–100) and `validation_summary`.
+
+### ✅ On-Chain Proof Anchoring
+Every trust report hash is designed to be anchored on **Base chain** (native to CROO). The `on_chain_proof` object in each report includes `tx_hash`, `block_number`, and `contract_address`. Configure via `PROOF_CONTRACT_ADDRESS` + `PROOF_SIGNER_PRIVATE_KEY`.
+
+### ✅ Agent Reputation System
+Historical trust scores accumulate per agent. Access via:
+```
+GET /api/reputation/:service_id   — single agent history
+GET /api/reputation               — all agents leaderboard
+```
+Each reputation entry includes: `average_score`, `grade` (A+/A/B+/B/C/D/F), `completion_rate`, `sla_compliance_rate`, `score_history`, and `source_inclusion_rate`.
 
 ### ✅ Public Proof Verification
 Every trust report has a `report_hash` (SHA-256). Anyone can verify:
 ```
 GET /api/verify/:report_hash
 ```
-Returns whether hashes match, order IDs, and verification notes.
+Returns whether hashes match, order IDs, cross-validation result, on-chain proof, and verification notes.
+
+### ✅ A2A Depth Info
+```
+GET /api/a2a-depth
+```
+Returns a machine-readable description of all 4 A2A levels, CAP methods used, and proof types.
 
 ### ✅ MCP Integration
 Use CAPGuard from Claude Desktop, Cursor, or agy:

@@ -212,6 +212,64 @@ app.post("/api/jobs/trigger", async (req, res) => {
 
 // ─── Start API Server ────────────────────────────────────────────────────────
 
+// ─── Agent Reputation Endpoint ──────────────────────────────────────────────
+// Historical performance tracking per candidate agent — used by dashboard
+
+app.get("/api/reputation/:service_id", (req, res) => {
+  try {
+    const { service_id } = req.params;
+    const reputation = database.getAgentReputation(service_id);
+    if (!reputation) {
+      res.status(404).json({ error: "No evaluation data found for this agent" });
+      return;
+    }
+    res.json(reputation);
+  } catch (error: any) {
+    logger.error({ error: error.message }, "Failed to get reputation");
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── All Agent Reputations ──────────────────────────────────────────────────
+
+app.get("/api/reputation", (_req, res) => {
+  try {
+    const reputations = database.getAllAgentReputations();
+    res.json(reputations);
+  } catch (error: any) {
+    logger.error({ error: error.message }, "Failed to get reputations");
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── A2A Depth Info ──────────────────────────────────────────────────────────
+
+app.get("/api/a2a-depth", (_req, res) => {
+  res.json({
+    max_depth: 4,
+    levels: [
+      { level: 1, description: "Buyer → CAPGuard TrustRouter", type: "trust_evaluation_order" },
+      { level: 2, description: "CAPGuard → Candidate Agents (fan-out)", type: "sub_order_evaluation" },
+      { level: 3, description: "CAPGuard → Winner Agent (route-and-execute)", type: "routed_execution" },
+      { level: 4, description: "CAPGuard → Runner-up (cross-validation)", type: "cross_validation" },
+    ],
+    proof: {
+      sha256_report_hash: true,
+      sha256_execution_log_hash: true,
+      on_chain_anchor: "Base (when configured)",
+    },
+    cap_methods_used: [
+      "connectWebSocket",
+      "negotiateOrder",
+      "acceptNegotiation",
+      "payOrder",
+      "deliverOrder",
+      "getDelivery",
+      "getOrder",
+    ],
+  });
+});
+
 export function startApiServer(port: number = 3001) {
   app.listen(port, () => {
     logger.info({ port }, "📊 Dashboard API server running");

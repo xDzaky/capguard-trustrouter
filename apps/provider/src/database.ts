@@ -340,6 +340,75 @@ export const database = {
     });
   },
 
+  // Agent Reputation — historical performance per service_id
+  getAgentReputation(serviceId: string): import("@capguard/shared").AgentReputation | null {
+    const subs = db.prepare(`
+      SELECT * FROM sub_orders WHERE service_id = ? AND status = 'completed' ORDER BY created_at ASC
+    `).all(serviceId) as any[];
+
+    if (subs.length === 0) return null;
+
+    const totalSubs = db.prepare(`SELECT COUNT(*) as cnt FROM sub_orders WHERE service_id = ?`).get(serviceId) as any;
+    const totalEval = totalSubs?.cnt || subs.length;
+
+    const scores = subs.filter((s) => s.score != null).map((s) => s.score as number);
+    const avgScore = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+    const latencies = subs.filter((s) => s.latency_ms != null).map((s) => s.latency_ms as number);
+    const avgLatency = latencies.length > 0 ? Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length) : 0;
+
+    // Compute score history by day
+    const byDay: Record<string, number[]> = {};
+    for (const s of subs) {
+      const day = (s.created_at as string).slice(0, 10);
+      if (!byDay[day]) byDay[day] = [];
+      if (s.score != null) byDay[day].push(s.score);
+    }
+    const scoreHistory = Object.entries(byDay).map(([date, dayScores]) => ({
+      date,
+      score: Math.round(dayScores.reduce((a, b) => a + b, 0) / dayScores.length),
+    }));
+
+    // Compute grade from average score
+    const grade = avgScore >= 90 ? "A+" : avgScore >= 80 ? "A" : avgScore >= 70 ? "B+" :
+      avgScore >= 60 ? "B" : avgScore >= 50 ? "C" : avgScore >= 40 ? "D" : "F";
+
+    // SLA and sources from delivery_text
+    let slaCount = 0, srcCount = 0;
+    for (const s of subs) {
+      try {
+        const parsed = s.delivery_text ? JSON.parse(s.delivery_text) : {};
+        if (parsed.sources && parsed.sources.length > 0) srcCount++;
+      } catch { /* ignore */ }
+      // Approximate SLA check from latency (60s threshold)
+      if (s.latency_ms != null && s.latency_ms < 60_000) slaCount++;
+    }
+
+    return {
+      service_id: serviceId,
+      agent_name: subs[0]?.agent_name || serviceId,
+      total_evaluations: totalEval,
+      average_score: avgScore,
+      completion_rate: totalEval > 0 ? Math.round((subs.length / totalEval) * 100) : 0,
+      avg_latency_ms: avgLatency,
+      sla_compliance_rate: subs.length > 0 ? Math.round((slaCount / subs.length) * 100) : 0,
+      source_inclusion_rate: subs.length > 0 ? Math.round((srcCount / subs.length) * 100) : 0,
+      first_seen: subs[0]?.created_at || "",
+      last_seen: subs[subs.length - 1]?.created_at || "",
+      score_history: scoreHistory,
+      grade: grade as any,
+    };
+  },
+
+  getAllAgentReputations(): import("@capguard/shared").AgentReputation[] {
+    const serviceIds = db.prepare(
+      `SELECT DISTINCT service_id FROM sub_orders WHERE status = 'completed'`
+    ).all() as any[];
+
+    return serviceIds
+      .map((row) => this.getAgentReputation(row.service_id))
+      .filter(Boolean) as import("@capguard/shared").AgentReputation[];
+  },
+
   close() {
     db.close();
   },
