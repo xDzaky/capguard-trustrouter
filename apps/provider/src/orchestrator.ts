@@ -1,12 +1,14 @@
-// ─── CAPGuard TrustRouter Orchestrator ──────────────────────────────────────
-// Core engine: receives buyer intent, fans out sub-orders to candidates,
-// verifies deliveries, computes trust scores, returns trust report.
+// ─── CAPGuard TrustRouter Orchestrator (v2) ────────────────────────────────
+// Supports: STRICT_CAP_MODE, DEMO_MODE, route-and-execute, external candidate config
 
+import fs from "node:fs";
+import path from "node:path";
 import {
   type CandidateResult,
   type TrustReport,
+  type RoutedExecution,
   type CandidateAgentConfig,
-  type EventLogEntry,
+  type OperatingMode,
   BuyerRequestSchema,
   CandidateDeliverySchema,
   calculateTrustScore,
@@ -18,10 +20,22 @@ import {
 } from "@capguard/shared";
 import { database } from "./database.js";
 import logger from "./logger.js";
+import { CapOrderCoordinator } from "./cap-coordinator.js";
 
-// ─── Candidate Agent Registry ───────────────────────────────────────────────
+// ─── Operating Mode ──────────────────────────────────────────────────────────
 
-const CANDIDATE_AGENTS: CandidateAgentConfig[] = [
+export function getOperatingMode(): OperatingMode {
+  const demoMode = process.env.DEMO_MODE === "true";
+  const strictCapMode = process.env.STRICT_CAP_MODE === "true";
+  if (strictCapMode && demoMode) {
+    logger.warn("STRICT_CAP_MODE and DEMO_MODE both set — STRICT takes precedence");
+  }
+  return { demoMode, strictCapMode };
+}
+
+// ─── Candidate Agent Registry ─────────────────────────────────────────────
+
+const BUILTIN_DEV_CANDIDATES: CandidateAgentConfig[] = [
   {
     service_id: "svc_research_alpha",
     agent_name: "ResearchAlpha",
@@ -46,26 +60,62 @@ const CANDIDATE_AGENTS: CandidateAgentConfig[] = [
 ];
 
 export function getCandidateAgents(): CandidateAgentConfig[] {
-  // Override with env if available
+  const { demoMode, strictCapMode } = getOperatingMode();
+
+  // 1. Explicit service ID list from env
   const envIds = process.env.CROO_TARGET_SERVICE_IDS;
-  if (envIds) {
+  if (envIds && envIds.trim()) {
     const ids = envIds.split(",").map((s) => s.trim()).filter(Boolean);
-    return ids.map((id, i) => {
-      const existing = CANDIDATE_AGENTS.find((a) => a.service_id === id);
-      if (existing) return existing;
-      return {
-        service_id: id,
-        agent_name: `Agent_${i + 1}`,
-        description: `Candidate agent ${id}`,
-        sla_timeout_ms: 60_000,
-        price_usdc: "0.01",
-      };
-    });
+    return ids.map((id, i) => ({
+      service_id: id,
+      agent_name: `Agent_${i + 1}`,
+      description: `Candidate agent ${id}`,
+      sla_timeout_ms: 60_000,
+      price_usdc: "0.01",
+    }));
   }
-  return CANDIDATE_AGENTS;
+
+  // 2. JSON config file from env
+  const configPath = process.env.CANDIDATE_AGENTS_CONFIG;
+  if (configPath) {
+    const resolved = path.resolve(configPath);
+    if (fs.existsSync(resolved)) {
+      try {
+        const raw = fs.readFileSync(resolved, "utf-8");
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          logger.info({ configPath: resolved, count: parsed.length }, "Loaded candidate agents from config file");
+          return parsed as CandidateAgentConfig[];
+        }
+      } catch (e: any) {
+        logger.error({ configPath, error: e.message }, "Failed to parse CANDIDATE_AGENTS_CONFIG");
+      }
+    }
+  }
+
+  // 3. In STRICT mode, no fallback to dev candidates
+  if (strictCapMode) {
+    throw new Error(
+      "STRICT_CAP_MODE=true but no candidate agent config found. " +
+      "Set CROO_TARGET_SERVICE_IDS or CANDIDATE_AGENTS_CONFIG."
+    );
+  }
+
+  // 4. Demo mode: use built-in dev candidates
+  if (demoMode) {
+    logger.warn("Using built-in dev candidate agents (DEMO_MODE=true)");
+    return BUILTIN_DEV_CANDIDATES;
+  }
+
+  // 5. Default fallback (neither strict nor explicit demo — warn but continue)
+  logger.warn(
+    "No candidate agent config found and DEMO_MODE is not set. " +
+    "Using built-in dev candidates. Set DEMO_MODE=true explicitly."
+  );
+  return BUILTIN_DEV_CANDIDATES;
 }
 
-// ─── Orchestration Types ────────────────────────────────────────────────────
+// ─── Orchestration Context ───────────────────────────────────────────────────
 
 interface OrchestrationContext {
   jobId: string;
@@ -73,49 +123,44 @@ interface OrchestrationContext {
   orderId: string;
   candidates: CandidateAgentConfig[];
   startedAt: number;
+  autoRoute: boolean;
 }
 
-// ─── The Orchestrator Class ─────────────────────────────────────────────────
+// ─── The Orchestrator Class ──────────────────────────────────────────────────
 
 export class TrustRouterOrchestrator {
-  private capClient: any; // CROO SDK AgentClient (typed as any for SDK flexibility)
+  private capClient: any;
   private executorClient: any;
+  private coordinator: CapOrderCoordinator;
 
   constructor(providerClient: any, executorClient: any) {
     this.capClient = providerClient;
     this.executorClient = executorClient;
+    this.coordinator = new CapOrderCoordinator(executorClient);
   }
 
-  /**
-   * Start a trust evaluation job.
-   * Called when a buyer order is paid.
-   */
   async startTrustJob(
     orderId: string,
     buyerIntent: string,
-    buyerWallet: string = "unknown"
+    buyerWallet: string = "unknown",
+    autoRoute: boolean = false
   ): Promise<TrustReport> {
-    const jobId = generateId("job");
+    const { demoMode, strictCapMode } = getOperatingMode();
     const candidates = getCandidateAgents();
+    const jobId = generateId("job");
 
-    logger.info({ jobId, orderId, buyerIntent, candidateCount: candidates.length },
-      "🚀 Starting trust evaluation job");
+    logger.info(
+      { jobId, orderId, buyerIntent, candidates: candidates.length, demoMode, strictCapMode, autoRoute },
+      "🚀 Starting trust evaluation job"
+    );
 
-    // Create job in database
-    database.createJob({
-      id: jobId,
-      buyer_wallet: buyerWallet,
-      buyer_intent: buyerIntent,
-      order_id: orderId,
-    });
-
+    database.createJob({ id: jobId, buyer_wallet: buyerWallet, buyer_intent: buyerIntent, order_id: orderId });
     database.updateJobStatus(jobId, "in_progress");
-
     database.addEventLog(jobId, {
       event: "JobStarted",
       actor: "trustrouter",
       order_id: orderId,
-      details: `Trust evaluation started with ${candidates.length} candidates`,
+      details: `mode=${strictCapMode ? "STRICT" : demoMode ? "DEMO" : "DEFAULT"} candidates=${candidates.length} autoRoute=${autoRoute}`,
     });
 
     const ctx: OrchestrationContext = {
@@ -124,239 +169,124 @@ export class TrustRouterOrchestrator {
       orderId,
       candidates,
       startedAt: Date.now(),
+      autoRoute,
     };
 
     try {
-      // Fan out sub-orders to all candidates
       const results = await this.fanOutSubOrders(ctx);
-
-      // Generate trust report
-      const report = this.generateTrustReport(ctx, results);
-
-      // Save to database
+      const report = await this.generateTrustReport(ctx, results);
       database.completeJob(jobId, report);
-
       database.addEventLog(jobId, {
         event: "JobCompleted",
         actor: "trustrouter",
         order_id: orderId,
-        details: `Trust report generated. Recommended: ${report.recommended_service_id} (score: ${report.average_score})`,
+        details: `Recommended: ${report.recommended_service_id} (score: ${report.average_score})`,
       });
 
-      logger.info({
-        jobId,
-        recommended: report.recommended_service_id,
-        avgScore: report.average_score,
-        reportHash: report.report_hash.slice(0, 18) + "...",
-      }, "✅ Trust evaluation complete");
-
+      logger.info(
+        { jobId, recommended: report.recommended_service_id, avgScore: report.average_score },
+        "✅ Trust evaluation complete"
+      );
       return report;
     } catch (error: any) {
       database.updateJobStatus(jobId, "failed");
-      database.addEventLog(jobId, {
-        event: "JobFailed",
-        actor: "trustrouter",
-        details: error.message,
-      });
+      database.addEventLog(jobId, { event: "JobFailed", actor: "trustrouter", details: error.message });
       logger.error({ jobId, error: error.message }, "❌ Trust evaluation failed");
       throw error;
     }
   }
 
-  /**
-   * Fan out sub-orders to all candidate agents in parallel.
-   */
   private async fanOutSubOrders(ctx: OrchestrationContext): Promise<CandidateResult[]> {
-    const results: CandidateResult[] = [];
+    const { demoMode, strictCapMode } = getOperatingMode();
+    logger.info({ jobId: ctx.jobId, count: ctx.candidates.length }, "📤 Dispatching sub-orders");
 
-    logger.info({ jobId: ctx.jobId, count: ctx.candidates.length },
-      "📤 Dispatching sub-orders to candidate agents");
-
-    // Create all sub-orders in parallel
     const subOrderPromises = ctx.candidates.map(async (candidate) => {
       const subId = generateId("sub");
       const startTime = Date.now();
 
-      database.createSubOrder({
-        id: subId,
-        job_id: ctx.jobId,
-        service_id: candidate.service_id,
-        agent_name: candidate.agent_name,
-      });
-
+      database.createSubOrder({ id: subId, job_id: ctx.jobId, service_id: candidate.service_id, agent_name: candidate.agent_name });
       database.addEventLog(ctx.jobId, {
         event: "SubOrderCreated",
         actor: "trustrouter_executor",
         target: candidate.service_id,
-        details: `Dispatching sub-order to ${candidate.agent_name}`,
+        details: `Dispatching to ${candidate.agent_name}`,
       });
 
       try {
-        // Try to create CAP negotiation via SDK
-        const result = await this.executeSubOrder(
-          ctx, candidate, subId, startTime
-        );
+        const result = await this.executeRealSubOrder(ctx, candidate, subId, startTime);
         return result;
       } catch (error: any) {
-        logger.warn({
-          subId,
-          candidate: candidate.agent_name,
-          error: error.message,
-        }, "⚠️ Sub-order failed, using simulated response");
+        logger.warn({ subId, candidate: candidate.agent_name, error: error.message }, "⚠️ Real sub-order failed");
 
-        // Fallback to simulated response for demo
+        if (strictCapMode) {
+          // In strict mode — mark as failed, no simulation
+          database.updateSubOrderStatus(subId, "failed");
+          database.addEventLog(ctx.jobId, {
+            event: "SubOrderFailed",
+            actor: candidate.service_id,
+            details: `STRICT_CAP_MODE: ${error.message}`,
+          });
+          return this.buildFailedResult(candidate, subId, Date.now() - startTime, error.message);
+        }
+
+        if (demoMode) {
+          // Demo mode: allowed to simulate, but must log it
+          database.addEventLog(ctx.jobId, {
+            event: "SimulationFallbackUsed",
+            actor: candidate.service_id,
+            details: `DEMO_MODE fallback: ${error.message}`,
+          });
+          return this.simulateSubOrder(ctx, candidate, subId, startTime);
+        }
+
+        // Default: simulate with warning
+        logger.warn({ candidate: candidate.agent_name }, "Falling back to simulation (set DEMO_MODE=true explicitly)");
+        database.addEventLog(ctx.jobId, {
+          event: "SimulationFallbackUsed",
+          actor: candidate.service_id,
+          details: `Implicit demo fallback: ${error.message}`,
+        });
         return this.simulateSubOrder(ctx, candidate, subId, startTime);
       }
     });
 
     const settled = await Promise.allSettled(subOrderPromises);
-
+    const results: CandidateResult[] = [];
     for (const result of settled) {
-      if (result.status === "fulfilled") {
-        results.push(result.value);
-      }
+      if (result.status === "fulfilled") results.push(result.value);
     }
-
     return results;
   }
 
-  /**
-   * Execute a sub-order via CROO CAP SDK.
-   */
-  private async executeSubOrder(
+  private async executeRealSubOrder(
     ctx: OrchestrationContext,
     candidate: CandidateAgentConfig,
     subId: string,
     startTime: number
   ): Promise<CandidateResult> {
-    // Attempt real CAP negotiation
-    const neg = await this.executorClient.negotiateOrder({
-      serviceId: candidate.service_id,
-      requirements: JSON.stringify({
-        task: ctx.buyerIntent,
-        job_id: ctx.jobId,
-        type: "trust_evaluation",
-      }),
-    });
+    const capResult = await this.coordinator.executeOrder(
+      candidate.service_id,
+      JSON.stringify({ task: ctx.buyerIntent, job_id: ctx.jobId, type: "trust_evaluation" }),
+      candidate.sla_timeout_ms
+    );
 
-    const negId = neg.negotiationId || neg.negotiation_id || neg.id;
+    database.updateSubOrderStatus(subId, "completed");
+    const latencyMs = capResult.latency_ms;
+    const delivery = capResult.delivery;
 
-    database.updateSubOrderStatus(subId, "pending_payment");
-    database.addEventLog(ctx.jobId, {
-      event: "NegotiationCreated",
-      actor: "trustrouter_executor",
-      target: candidate.service_id,
-      negotiation_id: negId,
-    });
-
-    // Wait for order to be created and pay
-    // In production, this would be event-driven via WebSocket
-    await this.waitAndPay(negId, candidate.sla_timeout_ms);
-
-    database.updateSubOrderStatus(subId, "paid");
-    database.addEventLog(ctx.jobId, {
-      event: "SubOrderPaid",
-      actor: "trustrouter_executor",
-      target: candidate.service_id,
-    });
-
-    // Wait for delivery
-    const delivery = await this.waitForDelivery(negId, candidate.sla_timeout_ms);
-    const latencyMs = Date.now() - startTime;
-
-    // Validate delivery
-    return this.evaluateDelivery(ctx, candidate, subId, delivery, latencyMs, negId);
+    return this.evaluateDelivery(ctx, candidate, subId, delivery, latencyMs, capResult.negotiation_id, capResult.order_id, capResult.retries);
   }
 
-  /**
-   * Simulate a sub-order for demo/testing when real CAP isn't available.
-   */
-  private async simulateSubOrder(
-    ctx: OrchestrationContext,
-    candidate: CandidateAgentConfig,
-    subId: string,
-    startTime: number
-  ): Promise<CandidateResult> {
-    // Simulate processing time (2-15 seconds)
-    const delay = 2000 + Math.random() * 13000;
-    await new Promise((resolve) => setTimeout(resolve, Math.min(delay, 5000)));
-
-    const latencyMs = Date.now() - startTime;
-    const negId = generateId("neg_sim");
-
-    // Simulate varied quality of responses
-    const quality = Math.random();
-    const schemaValid = quality > 0.2;
-    const sourcesPresent = quality > 0.4;
-    const proofPresent = quality > 0.3;
-    const sla = latencyMs < candidate.sla_timeout_ms;
-    const consistent = quality > 0.25;
-
-    const score = calculateTrustScore({
-      schema_valid: schemaValid,
-      proof_present: proofPresent,
-      sources_present: sourcesPresent,
-      sla_passed: sla,
-      latency_ms: latencyMs,
-      delivery_consistency: consistent,
-    });
-
-    const result: CandidateResult = {
-      service_id: candidate.service_id,
-      agent_name: candidate.agent_name,
-      order_id: generateId("ord_sim"),
-      negotiation_id: negId,
-      status: schemaValid ? "completed" : "failed",
-      schema_valid: schemaValid,
-      sources_present: sourcesPresent,
-      sla_passed: sla,
-      proof_present: proofPresent,
-      latency_ms: latencyMs,
-      delivery_consistency: consistent,
-      score,
-      raw_delivery: JSON.stringify({
-        content: `Simulated response from ${candidate.agent_name} for: ${ctx.buyerIntent}`,
-        sources: sourcesPresent ? ["https://example.com/source1", "https://example.com/source2"] : [],
-        confidence: quality,
-      }),
-    };
-
-    // Update database
-    database.completeSubOrder(subId, {
-      latency_ms: latencyMs,
-      delivery_text: result.raw_delivery || "",
-      score,
-    });
-
-    database.addEventLog(ctx.jobId, {
-      event: "SubOrderCompleted_Simulated",
-      actor: candidate.service_id,
-      target: "trustrouter",
-      details: `Score: ${score}/100, Schema: ${schemaValid}, Sources: ${sourcesPresent}`,
-    });
-
-    logger.info({
-      candidate: candidate.agent_name,
-      score,
-      latencyMs,
-      schemaValid,
-    }, `📦 Sub-order result (simulated)`);
-
-    return result;
-  }
-
-  /**
-   * Evaluate a delivery from a candidate agent.
-   */
   private evaluateDelivery(
     ctx: OrchestrationContext,
     candidate: CandidateAgentConfig,
     subId: string,
     delivery: any,
     latencyMs: number,
-    negId: string
+    negId: string,
+    orderId: string,
+    retries: number = 0
   ): CandidateResult {
-    // Try to parse as structured delivery
     let schemaValid = false;
     let sourcesPresent = false;
     let proofPresent = false;
@@ -371,22 +301,14 @@ export class TrustRouterOrchestrator {
       proofPresent = delivery != null && delivery !== "";
       consistent = schemaValid;
     } catch {
-      schemaValid = false;
       proofPresent = delivery != null && delivery !== "";
     }
 
-    const score = calculateTrustScore({
-      schema_valid: schemaValid,
-      proof_present: proofPresent,
-      sources_present: sourcesPresent,
-      sla_passed: sla,
-      latency_ms: latencyMs,
-      delivery_consistency: consistent,
-    });
+    const score = calculateTrustScore({ schema_valid: schemaValid, proof_present: proofPresent, sources_present: sourcesPresent, sla_passed: sla, latency_ms: latencyMs, delivery_consistency: consistent });
 
     database.completeSubOrder(subId, {
       latency_ms: latencyMs,
-      delivery_text: typeof delivery === "string" ? delivery : JSON.stringify(delivery),
+      delivery_text: typeof delivery === "string" ? delivery : JSON.stringify(delivery ?? {}),
       score,
     });
 
@@ -394,13 +316,13 @@ export class TrustRouterOrchestrator {
       event: "SubOrderEvaluated",
       actor: "trustrouter",
       target: candidate.service_id,
-      details: `Score: ${score}/100`,
+      details: `Score: ${score}/100, retries: ${retries}`,
     });
 
     return {
       service_id: candidate.service_id,
       agent_name: candidate.agent_name,
-      order_id: generateId("ord"),
+      order_id: orderId,
       negotiation_id: negId,
       status: schemaValid ? "completed" : "delivered",
       schema_valid: schemaValid,
@@ -410,21 +332,162 @@ export class TrustRouterOrchestrator {
       latency_ms: latencyMs,
       delivery_consistency: consistent,
       score,
-      raw_delivery: typeof delivery === "string" ? delivery : JSON.stringify(delivery),
+      retries,
+      raw_delivery: typeof delivery === "string" ? delivery : JSON.stringify(delivery ?? {}),
     };
   }
 
-  /**
-   * Generate the final trust report from all candidate results.
-   */
-  private generateTrustReport(
+  private async simulateSubOrder(
     ctx: OrchestrationContext,
-    results: CandidateResult[]
-  ): TrustReport {
+    candidate: CandidateAgentConfig,
+    subId: string,
+    startTime: number
+  ): Promise<CandidateResult> {
+    const delay = 2000 + Math.random() * 5000;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(delay, 5000)));
+
+    const latencyMs = Date.now() - startTime;
+    const quality = Math.random();
+    const schemaValid = quality > 0.2;
+    const sourcesPresent = quality > 0.4;
+    const proofPresent = quality > 0.3;
+    const sla = latencyMs < candidate.sla_timeout_ms;
+    const consistent = quality > 0.25;
+
+    const score = calculateTrustScore({ schema_valid: schemaValid, proof_present: proofPresent, sources_present: sourcesPresent, sla_passed: sla, latency_ms: latencyMs, delivery_consistency: consistent });
+
+    const rawDelivery = JSON.stringify({
+      content: `Simulated response from ${candidate.agent_name} for: ${ctx.buyerIntent}`,
+      sources: sourcesPresent ? ["https://example.com/source1", "https://example.com/source2"] : [],
+      confidence: quality,
+    });
+
+    database.completeSubOrder(subId, { latency_ms: latencyMs, delivery_text: rawDelivery, score });
+    database.addEventLog(ctx.jobId, {
+      event: "SubOrderCompleted_Simulated",
+      actor: candidate.service_id,
+      target: "trustrouter",
+      details: `Score: ${score}/100`,
+    });
+
+    return {
+      service_id: candidate.service_id,
+      agent_name: candidate.agent_name,
+      order_id: generateId("ord_sim"),
+      negotiation_id: generateId("neg_sim"),
+      status: schemaValid ? "completed" : "failed",
+      schema_valid: schemaValid,
+      sources_present: sourcesPresent,
+      sla_passed: sla,
+      proof_present: proofPresent,
+      latency_ms: latencyMs,
+      delivery_consistency: consistent,
+      score,
+      retries: 0,
+      raw_delivery: rawDelivery,
+    };
+  }
+
+  private buildFailedResult(candidate: CandidateAgentConfig, subId: string, latencyMs: number, errorMsg: string): CandidateResult {
+    return {
+      service_id: candidate.service_id,
+      agent_name: candidate.agent_name,
+      order_id: generateId("ord_fail"),
+      negotiation_id: generateId("neg_fail"),
+      status: "failed",
+      schema_valid: false,
+      sources_present: false,
+      sla_passed: false,
+      proof_present: false,
+      latency_ms: latencyMs,
+      delivery_consistency: false,
+      score: 0,
+      retries: 0,
+      error: errorMsg,
+    };
+  }
+
+  private async performRoutedExecution(
+    ctx: OrchestrationContext,
+    winnerId: string
+  ): Promise<RoutedExecution> {
+    const startTime = Date.now();
+    logger.info({ jobId: ctx.jobId, winnerId }, "🎯 Route-and-execute: creating winner order");
+
+    database.addEventLog(ctx.jobId, {
+      event: "RouteAndExecuteStarted",
+      actor: "trustrouter",
+      target: winnerId,
+      details: "Second-stage order to winner agent",
+    });
+
+    try {
+      const capResult = await this.coordinator.executeOrder(
+        winnerId,
+        JSON.stringify({ task: ctx.buyerIntent, job_id: ctx.jobId, type: "routed_execution" }),
+        90_000
+      );
+
+      const deliveryText = typeof capResult.delivery === "string"
+        ? capResult.delivery
+        : JSON.stringify(capResult.delivery ?? {});
+
+      const { hashReport: hashFn } = await import("@capguard/shared");
+      const deliveryHash = hashFn(deliveryText as any);
+
+      database.addEventLog(ctx.jobId, {
+        event: "RouteAndExecuteCompleted",
+        actor: winnerId,
+        target: "trustrouter",
+        details: `Winner order: ${capResult.order_id}`,
+      });
+
+      return {
+        enabled: true,
+        winner_service_id: winnerId,
+        winner_order_id: capResult.order_id,
+        winner_delivery_hash: deliveryHash,
+        status: "completed",
+        latency_ms: Date.now() - startTime,
+      };
+    } catch (error: any) {
+      logger.error({ winnerId, error: error.message }, "❌ Route-and-execute failed");
+      database.addEventLog(ctx.jobId, {
+        event: "RouteAndExecuteFailed",
+        actor: "trustrouter",
+        details: error.message,
+      });
+      return {
+        enabled: true,
+        winner_service_id: winnerId,
+        winner_order_id: "",
+        winner_delivery_hash: "",
+        status: "failed",
+        latency_ms: Date.now() - startTime,
+      };
+    }
+  }
+
+  private async generateTrustReport(ctx: OrchestrationContext, results: CandidateResult[]): Promise<TrustReport> {
     const { recommended_service_id, recommended_reason } = selectBestCandidate(results);
     const stats = calculateStats(results);
     const eventLogs = database.getEventLogs(ctx.jobId);
     const executionLogHash = hashExecutionLog(eventLogs);
+
+    // Route-and-execute if requested
+    let routedExecution: RoutedExecution;
+    if (ctx.autoRoute && recommended_service_id) {
+      routedExecution = await this.performRoutedExecution(ctx, recommended_service_id);
+    } else {
+      routedExecution = {
+        enabled: false,
+        winner_service_id: recommended_service_id,
+        winner_order_id: "",
+        winner_delivery_hash: "",
+        status: "skipped",
+        latency_ms: 0,
+      };
+    }
 
     const baseReport: Omit<TrustReport, "report_hash"> = {
       report_id: generateId("tr"),
@@ -433,30 +496,14 @@ export class TrustRouterOrchestrator {
       candidate_agents: results,
       recommended_service_id,
       recommended_reason,
+      routed_execution: routedExecution,
       execution_log_hash: executionLogHash,
       generated_at: new Date().toISOString(),
       ...stats,
     };
 
     const reportHash = hashReport(baseReport as any);
-
-    return {
-      ...baseReport,
-      report_hash: reportHash,
-    };
-  }
-
-  // ─── Helpers (stubbed for now, real implementation needs WebSocket) ────────
-
-  private async waitAndPay(negId: string, timeout: number): Promise<void> {
-    // In production, listen to WebSocket for OrderCreated event, then call payOrder
-    // For now, this is a no-op as we handle it in the main event loop
-  }
-
-  private async waitForDelivery(negId: string, timeout: number): Promise<any> {
-    // In production, listen to WebSocket for OrderCompleted event
-    // For now, return null to trigger simulated flow
-    return null;
+    return { ...baseReport, report_hash: reportHash };
   }
 }
 

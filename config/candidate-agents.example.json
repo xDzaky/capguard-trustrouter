@@ -1,0 +1,29 @@
+[
+  {
+    "service_id": "svc_live_research_alpha",
+    "agent_name": "ResearchAlpha",
+    "description": "Deep research agent — registers as separate CROO Agent Store listing",
+    "owner_type": "external_or_separate_sdk_key",
+    "listing_url": "https://agent.croo.network/YOUR_RESEARCH_ALPHA_LISTING",
+    "sla_timeout_ms": 60000,
+    "price_usdc": "0.01"
+  },
+  {
+    "service_id": "svc_live_verify_beta",
+    "agent_name": "VerifyBeta",
+    "description": "Fact-checking and source validation agent — separate SDK key",
+    "owner_type": "external_or_separate_sdk_key",
+    "listing_url": "https://agent.croo.network/YOUR_VERIFY_BETA_LISTING",
+    "sla_timeout_ms": 45000,
+    "price_usdc": "0.01"
+  },
+  {
+    "service_id": "svc_live_format_gamma",
+    "agent_name": "FormatGamma",
+    "description": "Content formatting agent — separate SDK key",
+    "owner_type": "external_or_separate_sdk_key",
+    "listing_url": "https://agent.croo.network/YOUR_FORMAT_GAMMA_LISTING",
+    "sla_timeout_ms": 30000,
+    "price_usdc": "0.01"
+  }
+]

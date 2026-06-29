@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "capguard": {
+      "command": "npx",
+      "args": ["tsx", "apps/mcp-server/src/index.ts"],
+      "env": {
+        "CAPGUARD_API_URL": "http://localhost:3001"
+      }
+    }
+  }
+}

@@ -27,8 +27,19 @@ export interface CandidateResult {
   latency_ms: number;
   delivery_consistency: boolean;
   score: number;
+  retries: number;
   raw_delivery?: string;
   error?: string;
+}
+
+/** Result of route-and-execute second-stage order */
+export interface RoutedExecution {
+  enabled: boolean;
+  winner_service_id: string;
+  winner_order_id: string;
+  winner_delivery_hash: string;
+  status: "completed" | "failed" | "skipped";
+  latency_ms: number;
 }
 
 /** Trust report generated after evaluating all candidates */
@@ -39,6 +50,7 @@ export interface TrustReport {
   candidate_agents: CandidateResult[];
   recommended_service_id: string;
   recommended_reason: string;
+  routed_execution: RoutedExecution;
   report_hash: string;
   execution_log_hash: string;
   generated_at: string;
@@ -46,6 +58,12 @@ export interface TrustReport {
   completed_candidates: number;
   failed_candidates: number;
   average_score: number;
+}
+
+/** Operating mode for the provider */
+export interface OperatingMode {
+  demoMode: boolean;
+  strictCapMode: boolean;
 }
 
 /** A trust evaluation job */

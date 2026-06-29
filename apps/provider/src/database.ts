@@ -199,6 +199,17 @@ export const database = {
     return rows.map(enrichJob);
   },
 
+  getJobByReportHash(reportHash: string): TrustJob | null {
+    // Search in trust_report_json for a matching report_hash
+    const stmt = db.prepare(`
+      SELECT * FROM jobs
+      WHERE json_extract(trust_report_json, '$.report_hash') = ?
+      LIMIT 1
+    `);
+    const row = stmt.get(reportHash) as any;
+    return row ? enrichJob(row) : null;
+  },
+
   // Sub Orders
   createSubOrder(sub: {
     id: string;

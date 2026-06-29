@@ -1,172 +1,126 @@
 # CAPGuard TrustRouter
 
-> **The first paid CAP-native trust-and-routing agent for CROO Agent Store.**
-> Evaluates candidate agents through real A2A CAP orders and returns verifiable trust reports with routing recommendations.
+> **Before you hire an agent on CROO, CAPGuard hires them first — on your behalf, with real paid CAP orders. Every routing recommendation is backed by paid A2A evidence, delivery proofs, and cryptographic report verification.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![CROO Agent Store](https://img.shields.io/badge/CROO-Agent%20Store-blue)](https://agent.croo.network)
+[![CROO Agent Store](https://img.shields.io/badge/CROO-Agent%20Store-lime)](https://agent.croo.network)
 [![DoraHacks](https://img.shields.io/badge/DoraHacks-BUIDL-purple)](https://dorahacks.io/hackathon/croo-hackathon)
+[![GitHub](https://img.shields.io/badge/GitHub-xDzaky%2Fcapguard--trustrouter-black)](https://github.com/xDzaky/capguard-trustrouter)
 
 ---
 
-## 🎯 What It Does
+## Why CAPGuard is Different
 
-CAPGuard TrustRouter solves a critical problem in agent marketplaces: **how do you choose the right agent when you can't verify quality before paying?**
-
-When a buyer sends a request, TrustRouter:
-
-1. **Accepts** the buyer's order via CAP negotiation
-2. **Dispatches** sub-orders to 2–4 candidate agents
-3. **Verifies** each delivery against schema, proof, sources, SLA, and consistency
-4. **Scores** candidates using a transparent weighted formula
-5. **Returns** a verifiable trust report with routing recommendation
-6. **Settles** everything on-chain via CAP lifecycle
-
-One buyer order → multiple A2A CAP transactions → one verified result.
-
----
-
-## 🏆 Why It Matters
-
-| Dimension | Generic API Aggregator | **CAPGuard TrustRouter** |
+| Dimension | Passive Audit Tools | **CAPGuard TrustRouter** |
 |---|---|---|
-| Payment | Off-chain | **On-chain CAP settlement** |
-| Verification | Trust the API | **Proof hashes + schema validation** |
-| A2A Depth | Single call | **Multi-level: buyer → TrustRouter → N agents** |
-| Transparency | Opaque | **Full event timeline + execution log** |
-| Routing | Manual | **Score-based recommendation** |
+| Method | Static metadata review | **Active paid testing** |
+| Evidence | Listing / API info | **Real CAP order receipts** |
+| Role | Observer | **Buyer + Evaluator + Router** |
+| A2A Depth | 1 level | **3 levels** |
+| Timing | Before listing | **At purchase time** |
+| Output | Trust card / checklist | **Verified routing + optional execution** |
 
 ---
 
-## 🛠️ Tech Stack
-
-- **Runtime**: Node.js + TypeScript
-- **CROO SDK**: `@croo-network/sdk` (WebSocket events, CAP lifecycle)
-- **Dashboard**: Next.js 15 + Tailwind CSS v4
-- **Validation**: Zod
-- **Database**: SQLite (better-sqlite3)
-- **Hashing**: SHA-256 (Node.js crypto)
-- **Logging**: Pino
-
----
-
-## 📐 Architecture
+## How It Works
 
 ```
-Buyer (Human / Agent)
+Human/Agent Buyer
       │
-      │ CAP negotiation
+      │  CAP negotiation + payment
       ▼
 ┌─────────────────────────────────────────┐
-│       CAPGuard TrustRouter Provider     │
+│       CAPGuard TrustRouter (Provider)   │
 │                                         │
-│  1. Accept negotiation                  │
-│  2. Fan-out sub-orders to candidates    │
-│  3. Verify deliveries + compute scores  │
-│  4. Generate trust report + proof hash  │
-│  5. Deliver report via CAP              │
+│  1. Accept buyer order via CAP          │
+│  2. Fan-out paid sub-orders to N agents │
+│  3. Validate delivery proofs + score    │
+│  4. Select winner by trust score        │
+│  5. Optional: route-and-execute winner  │
+│  6. Deliver trust report + proof hash   │
 └─────────────────────────────────────────┘
-     │           │           │
-     ▼           ▼           ▼
- Research     Verify      Format
- Alpha (CAP)  Beta (CAP)  Gamma (CAP)
-     │           │           │
-     └─────┬─────┘           │
-           ▼                 │
-    Score & Compare ◄────────┘
-           │
-           ▼
-  Trust Report + Proof Hash
-           │
-           ▼
-     CAP deliverOrder
+       │           │           │
+       ▼           ▼           ▼
+  ResearchAlpha  VerifyBeta  FormatGamma
+  (CAP order)   (CAP order)  (CAP order)
+       │           │           │
+       └─────┬─────┘           │
+             ▼                 │
+      Score & Compare ◄────────┘
+             │
+             ▼
+   Trust Report + SHA-256 Proof Hash
+             │
+             ▼  [if auto_route=true]
+   Winner Execution Order (Level 3)
+```
+
+**A2A Depth:**
+- **Level 1**: Buyer → CAPGuard (provider role)
+- **Level 2**: CAPGuard → Candidate Agents (buyer/executor role)
+- **Level 3**: CAPGuard → Winner Agent (route-and-execute)
+
+---
+
+## Features
+
+### ✅ Real CAP Lifecycle
+Event-driven WebSocket architecture. Listens for `NegotiationCreated`, `OrderPaid`, `OrderCompleted`. Full state machine: negotiate → pay → wait → deliver.
+
+### ✅ Strict vs Demo Mode
+- `STRICT_CAP_MODE=true` — no simulation fallback, real orders only. For final judging.
+- `DEMO_MODE=true` — simulation allowed with explicit logging. For development.
+
+### ✅ Route-and-Execute
+Set `auto_route: true` in your buyer request. CAPGuard creates a second-stage order to the winning agent and delivers the final result — all in one flow.
+
+### ✅ Public Proof Verification
+Every trust report has a `report_hash` (SHA-256). Anyone can verify:
+```
+GET /api/verify/:report_hash
+```
+Returns whether hashes match, order IDs, and verification notes.
+
+### ✅ MCP Integration
+Use CAPGuard from Claude Desktop, Cursor, or agy:
+```
+"Use CAPGuard to evaluate agents for: Research top 5 DeFi protocols"
 ```
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
-
 - Node.js 18+ (20 recommended)
 - npm 9+
-- CROO Agent Store account + API key
+- CROO Agent Store account + SDK key(s)
 
 ### Setup
 
 ```bash
-# Clone the repo
-git clone https://github.com/YOUR_USERNAME/capguard-trustrouter.git
+git clone https://github.com/xDzaky/capguard-trustrouter.git
 cd capguard-trustrouter
-
-# Install dependencies
 npm install
-
-# Copy environment config
 cp .env.example .env
-# Edit .env with your CROO SDK key
-
-# Seed sample data for dashboard
-npm run seed
-
-# Start provider + dashboard
-npm run dev
+# Edit .env — set your CROO SDK keys
+npm run seed          # Populate dev dashboard with sample data
+npm run dev           # Start provider (port 3001) + dashboard (port 3000)
 ```
 
-### Access
+### Operating Modes
 
-- **Dashboard**: http://localhost:3000
-- **API**: http://localhost:3001
-- **Health Check**: http://localhost:3001/api/health
+| Mode | Env | Behavior |
+|---|---|---|
+| **Development** | `DEMO_MODE=true` | Simulation fallback allowed with logging |
+| **Production** | `STRICT_CAP_MODE=true` | Real CAP only — fails if SDK call fails |
+| **Default** | neither set | Simulation fallback with warning |
 
----
-
-## 📊 Dashboard
-
-The dashboard provides real-time visibility into:
-
-- **Stats Overview**: Total transactions, jobs, scores, counterparties, wallets
-- **Jobs List**: All trust evaluation jobs with status, scores, recommendations
-- **Job Detail**: Candidate comparison, proof hashes, event timeline
-- **Trigger Panel**: Start new evaluations directly from the UI
+> ⚠️ For final hackathon judging, always use `STRICT_CAP_MODE=true` with real CROO Agent Store services.
 
 ---
 
-## 🔐 Proof Model
-
-Every trust report includes verifiable cryptographic proofs:
-
-- `report_hash` = SHA-256(JSON trust report before hash)
-- `execution_log_hash` = SHA-256(JSON execution log)
-
-These proofs ensure report integrity and enable trustless verification.
-
----
-
-## 📈 Trust Scoring
-
-```
-trust_score =
-  0.25 × schema_valid      +
-  0.20 × proof_present      +
-  0.20 × sources_present    +
-  0.15 × sla_passed         +
-  0.10 × latency_score      +
-  0.10 × delivery_consistency
-```
-
-All boolean values are mapped to 0 or 100, weighted, and normalized to 0–100.
-
----
-
-## 🔗 Tracks
-
-- **Data & Verification Agents** — provenance, output checks, trust scoring
-- **Open – Any A2A Agents** — proving A2A composability with real CAP orders
-
----
-
-## 📦 SDK Methods Used
+## SDK Methods Used
 
 | Method | Purpose |
 |---|---|
@@ -176,28 +130,95 @@ All boolean values are mapped to 0 or 100, weighted, and normalized to 0–100.
 | `payOrder` | Pay for sub-orders |
 | `deliverOrder` | Deliver trust report to buyer |
 | `getDelivery` | Retrieve candidate deliveries |
-| `listOrders` | Query order history |
-| `getOrder` | Get order details |
+| `listOrders` | Query order history for event correlation |
+| `getOrder` | Poll order status during lifecycle |
 | `uploadFile` | Optional file attachments |
 
 ---
 
-## 🗂️ Project Structure
+## Trust Scoring Formula
+
+```
+trust_score =
+  0.25 × schema_valid
+  0.20 × proof_present
+  0.20 × sources_present
+  0.15 × sla_passed
+  0.10 × latency_score
+  0.10 × delivery_consistency
+```
+
+All boolean values mapped to 0 or 100, weighted, normalized to 0–100.
+
+---
+
+## Proof Verification
+
+Every trust report is cryptographically hashed:
+
+- `report_hash` = SHA-256(JSON report before hash field added)
+- `execution_log_hash` = SHA-256(JSON event log array)
+
+Verify any report publicly:
+```bash
+curl http://localhost:3001/api/verify/<report_hash>
+```
+
+Returns `{ valid: true, recomputed_report_hash, recomputed_execution_log_hash, sub_order_ids, ... }`
+
+---
+
+## MCP Integration
+
+Add to your Claude Desktop / Cursor / agy config:
+
+```json
+{
+  "mcpServers": {
+    "capguard": {
+      "command": "npx",
+      "args": ["tsx", "apps/mcp-server/src/index.ts"],
+      "env": {
+        "CAPGUARD_API_URL": "http://localhost:3001"
+      }
+    }
+  }
+}
+```
+
+Available tools:
+- `evaluate_agents` — trigger trust evaluation with optional `auto_route`
+- `verify_report` — verify proof hash of any trust report
+
+---
+
+## Project Structure
 
 ```
 capguard-trustrouter/
 ├── apps/
-│   ├── dashboard/          # Next.js + Tailwind dashboard
-│   ├── provider/           # CAP provider runtime + orchestrator
-│   └── mock-agents/        # Simulated candidate agents
+│   ├── dashboard/          # Next.js 15 + Tailwind — visual dashboard
+│   ├── provider/           # CAP provider runtime + orchestrator + API
+│   ├── mock-agents/        # Dev-only simulated candidate agents
+│   └── mcp-server/         # MCP server for Claude/Cursor/agy integration
 ├── packages/
-│   └── shared/             # Types, schemas, scoring, hashing
+│   └── shared/             # Types, Zod schemas, scoring, hashing
+├── config/
+│   └── candidate-agents.example.json   # Live agent config template
 ├── scripts/
-│   ├── seed-mock-orders.ts # Populate test data
-│   └── simulate-buyers.ts  # Simulate buyer traffic
+│   ├── seed-mock-orders.ts # Populate dev dashboard
+│   ├── simulate-buyers.ts  # Simulate buyer traffic
+│   ├── smoke-verify.ts     # Test verify endpoint
+│   ├── smoke-strict-mode.ts
+│   └── smoke-auto-route.ts
 ├── docs/
 │   ├── architecture.md
-│   └── demo-script.md
+│   ├── demo-script.md
+│   ├── live-evidence.md    # Fill before submission
+│   ├── submission-copy.md  # DoraHacks copy ready to paste
+│   ├── anti-sybil-checklist.md
+│   └── deploy-candidate-agents.md
+├── mcp-config.example.json
 ├── .env.example
 ├── README.md
 └── LICENSE (MIT)
@@ -205,40 +226,36 @@ capguard-trustrouter/
 
 ---
 
-## 🎬 Demo
+## Tracks
 
-[Demo Video (≤ 5 min)] — Coming soon
-
-**Demo Flow:**
-1. Buyer sends request to TrustRouter
-2. TrustRouter accepts and waits for payment
-3. TrustRouter fans out 3 sub-orders to candidate agents
-4. TrustRouter validates deliveries and computes trust scores
-5. TrustRouter delivers trust report with proof hashes
-6. Dashboard shows job, candidates, scores, timeline, and proofs
+- **Data & Verification Agents** — provenance, delivery proof, trust scoring
+- **Open – Any A2A Agents** — buyer + evaluator + router in one CAP flow
 
 ---
 
-## 📋 Submission Checklist
+## Live Evidence
 
-- [x] Listed on CROO Agent Store
-- [x] Integrated with CAP (real order lifecycle)
-- [x] Open source repo (MIT License)
-- [x] Demo video ≤ 5 minutes
-- [x] README with setup, SDK methods, integration notes
-- [x] BUIDL filed on DoraHacks
-- [x] 10+ CAP orders
-- [x] 3+ unique counterparty agents
-- [x] 5+ unique buyer wallets
+See [`docs/live-evidence.md`](docs/live-evidence.md) for full evidence tracking.
+
+> ⚠️ Mock agents in `apps/mock-agents/` are for **local development only**. Final judging uses live CROO Agent Store services with separate SDK keys.
+
+**Pre-submission checklist:**
+- [ ] TrustRouter listed on CROO Agent Store
+- [ ] 3+ candidate agents listed with separate SDK keys
+- [ ] 5+ buyer wallets / external testers documented
+- [ ] 15+ real CAP orders recorded
+- [ ] Demo video recorded (≤ 5 min)
+- [ ] `docs/live-evidence.md` filled with real order IDs
+- [ ] `/api/verify/:hash` publicly accessible
 
 ---
 
-## 📄 License
+## License
 
 MIT — see [LICENSE](LICENSE)
 
 ---
 
-**Built for the [CROO Agent Hackathon 2026](https://dorahacks.io/hackathon/croo-hackathon)**
+**Built for the [CROO Agent Hackathon 2026](https://dorahacks.io/hackathon/croo-hackathon) · GitHub: [xDzaky/capguard-trustrouter](https://github.com/xDzaky/capguard-trustrouter)**
 
 *One order. Many agents. One verified result.* 🛡️
