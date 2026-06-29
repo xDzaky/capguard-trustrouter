@@ -1,91 +1,152 @@
 # Demo Script — CAPGuard TrustRouter (5 Minutes)
+> Updated for Round 4 — includes SLA gate blocking, consensus scoring, evidence page
+
+---
 
 ## Pre-Demo Setup
 
-1. Start the provider: `npm run dev:provider`
-2. Seed sample data: `npm run seed`
-3. Start the dashboard: `npm run dev:dashboard`
-4. Open http://localhost:3000
+```bash
+# Terminal 1 — provider
+npm run dev:provider
+
+# Terminal 2 — mock agents
+npm run dev:mock-agents
+
+# Terminal 3 — dashboard
+npm run dev:dashboard
+
+# Seed sample data if no real orders yet
+npm run seed
+```
+
+Open: http://localhost:3000 (dashboard) and http://localhost:3000/evidence (evidence page)
 
 ---
 
 ## Script
 
-### 0:00–0:30 — The Problem
+### [00:00–00:25] HOOK
 
-> "There are 20+ agents on CROO Agent Store, but how does a buyer know which one to trust? Right now, the only way is to try them all — paying each one and hoping for the best. That's expensive and unreliable."
+> "In the CROO Agent Store, there are agents you can hire. But how do you know which one actually works?"
 >
-> "CAPGuard TrustRouter solves this. It's a paid CAP-native trust evaluation agent. You send one request, we test multiple agents, and we tell you exactly which one to use — with proof."
-
-### 0:30–1:30 — Live Demo: Dashboard Overview
-
-*Show the dashboard*
-
-> "Here's our dashboard. You can see [X] total CAP transactions, [Y] completed jobs, and our average trust score across all evaluations."
+> "You could hire them all and compare results yourself. That's expensive and unreliable."
 >
-> "Each job represents a real buyer request. Let me trigger a new one live."
-
-*Type in the trigger panel:* "Research the top 5 DeFi protocols by TVL this week"
-
-*Click Evaluate*
-
-> "TrustRouter just accepted this request. Behind the scenes, it's creating sub-orders to three candidate agents: ResearchAlpha, VerifyBeta, and FormatGamma."
-
-### 1:30–2:30 — Live Demo: Job Detail
-
-*Click into the completed job*
-
-> "Let's look at a completed evaluation. Here you can see all three candidates compared side by side."
+> "CAPGuard TrustRouter does it for you — it hires agents before you do, with real paid CAP orders, runs them in parallel, blocks the ones that fail, and hands you a cryptographically verified recommendation."
 >
-> "ResearchAlpha scored 89 out of 100 — valid schema, sources included, proof verified, within SLA."
->
-> "VerifyBeta scored 72 — sources were incomplete."
->
-> "FormatGamma scored only 35 — no sources, no proof, failed consistency check."
->
-> "TrustRouter automatically recommends ResearchAlpha as the best choice."
-
-### 2:30–3:30 — Technical Deep Dive
-
-*Show the proof hashes section*
-
-> "Every report includes SHA-256 proof hashes. The report hash covers the entire trust report — if any data changes, the hash breaks. The execution log hash covers every event in the pipeline."
->
-> "This isn't just a recommendation engine. It's a verifiable routing decision."
-
-*Show the event timeline*
-
-> "Here's the full audit trail: NegotiationCreated, OrderPaid, three SubOrderCreated events, three SubOrderCompleted events, and finally OrderDelivered with the report hash."
->
-> "That's 8+ CAP events from one buyer request."
-
-### 3:30–4:30 — Why CROO / CAP
-
-> "This architecture is only possible because of CAP:"
->
-> - "Negotiation and order creation give us structured buyer→provider flow"
-> - "Payment and settlement mean every sub-order is a real transaction"
-> - "Verifiable delivery ensures candidate agents can't fake responses"
-> - "WebSocket events give us real-time pipeline monitoring"
->
-> "On a regular API marketplace, you'd need to build all of this yourself. On CROO, it's built into the protocol."
-
-### 4:30–5:00 — Closing
-
-> "CAPGuard TrustRouter isn't just one agent — it's infrastructure that makes every other agent in the CROO ecosystem more valuable."
->
-> "One order. Many agents. One verified result."
->
-> "Thank you."
+> "One order. Four levels of A2A. One verified result."
 
 ---
 
-## Key Talking Points for Q&A
+### [00:25–01:30] LIVE DEMO — Dashboard + Fan-Out
 
-- **A2A Composability**: TrustRouter is both a provider (accepts buyer orders) and a buyer (creates sub-orders to candidates). This demonstrates the deepest A2A composability in the hackathon.
+*Open http://localhost:3000*
 
-- **Real CAP Orders**: Every demo generates 4-6+ real CAP transactions.
+> "Here's our dashboard — [X] total CAP transactions, [Y] completed evaluations, average trust score [Z]/100."
 
-- **Innovation**: Trust routing based on real order outcomes and verifiable proofs — not just API response checking.
+*Click "New Evaluation" / Trigger Panel*
 
-- **Scalability**: The architecture supports any number of candidate agents and scoring dimensions.
+> "Let me trigger a live evaluation."
+
+*Type intent:* `"Research top DeFi protocols on Base chain"`
+
+*Click Evaluate — watch jobs list update*
+
+> "CAPGuard just accepted this request as a provider. Now it's acting as a requester — creating paid sub-orders to three candidate agents simultaneously: ResearchAlpha, VerifyBeta, FormatGamma."
+>
+> "All three are real CROO Agent Store listings. Each gets a real CAP order, a real payment, and must deliver within their SLA."
+
+*Job completes — click into it*
+
+> "Let's look at the results..."
+
+---
+
+### [01:30–02:15] EVIDENCE PAGE
+
+*Open http://localhost:3000/evidence*
+
+> "Before I show you the trust report — let's look at the evidence page. This is what judges can use to verify everything."
+>
+> "You can see: total jobs, CAP transactions, unique buyer wallets. Every report hash is listed here with a Verify button."
+
+*Click a Verify button*
+
+> "This calls /api/verify/:hash — it recomputes the SHA-256 hash from the raw report and confirms nothing was tampered with. If you see valid: true, the report is cryptographically intact."
+
+---
+
+### [02:15–03:00] 4-LEVEL A2A + CROSS-VALIDATION
+
+> "Now let me explain why this is architecturally unique."
+>
+> "Most agents on CROO are Level 1 — one buyer, one agent. BNB Deployer Scorer reaches Level 2 with one sub-order. CAPGuard reaches Level 4."
+>
+> "Level 1: you hire CAPGuard."
+> "Level 2: CAPGuard hires 3 candidates in parallel — all paid."
+> "Level 3: CAPGuard hires the winner again for actual execution."
+> "Level 4: CAPGuard hires the runner-up to verify the winner's output."
+
+*Show cross-validation result in trust report*
+
+> "Here — VerifyBeta scored ResearchAlpha's delivery 88/100. That's independent validation, not CAPGuard's own judgment."
+
+---
+
+### [03:00–03:45] SLA GATE + CONSENSUS SCORING
+
+*Show sla_guard object in trust report or evidence page*
+
+> "Here's one of CAPGuard's core innovations: SLA-Gated Routing."
+>
+> "FormatGamma scored 41/100 — it failed schema validation and came in below the minimum score threshold. It's in the blocked_agents list with reasons: schema_invalid, score_below_threshold."
+>
+> "CAPGuard didn't route execution to FormatGamma. It was blocked at the gate."
+>
+> "This is what we mean by SLA-gated — it's not just ranking agents, it's refusing to forward to agents that don't meet the bar."
+
+*Show consensus object*
+
+> "And here's consensus scoring — using keyword overlap across all three deliveries, we get an agreement score of [X]%. This tells you how reliable the recommendation is: high agreement means the agents broadly agree."
+
+---
+
+### [03:45–04:30] MCP INTEGRATION
+
+*Open MCP config or Claude Desktop*
+
+> "CAPGuard is also callable as an MCP tool — from Claude Desktop, Cursor, or agy."
+
+*Demo: send prompt via MCP*
+
+> "I can say: 'Use CAPGuard to evaluate agents for: research DeFi protocols.' Claude calls the evaluate_agents MCP tool, CAPGuard runs the full 4-level A2A evaluation, and returns the trust report — all from inside my AI assistant."
+
+---
+
+### [04:30–05:00] CLOSE
+
+> "CAPGuard TrustRouter isn't just one agent — it's infrastructure that makes every other agent in the CROO ecosystem more accountable."
+>
+> "Before you hire an agent, CAPGuard hires them first — with real paid CAP orders, SLA verification, cross-validation, and cryptographic proof."
+>
+> "One order. Four levels. One verified result."
+
+*Show GitHub link + Agent Store listing + DoraHacks link*
+
+---
+
+## Key Talking Points (Q&A)
+
+**On A2A Composability:**
+> "We're the only BUIDL with 4-level depth. BNB Deployer Scorer is 2 levels with 1 sub-agent. We're 4 levels with 3 parallel sub-orders + route-and-execute + cross-validation."
+
+**On SLA Gate vs Escrow:**
+> "This is routing control, not escrow. CAPGuard defers the payOrder call until a candidate passes all 4 quality gates. It doesn't hold or release funds after delivery."
+
+**On Consensus Scoring:**
+> "Jaccard keyword similarity across all candidate deliveries. No LLM required. Agreement score 0-100 with outlier detection."
+
+**On On-Chain Proof:**
+> "We generate a SHA-256 report hash that's tamper-evident. Optional Base chain anchoring is available when PROOF_CONTRACT_ADDRESS is configured. We never fabricate a tx_hash."
+
+**On Real Orders:**
+> "Every evaluation you see generated real CAP orders. Each job = 1 buyer order + 3 sub-orders + 1-2 validation orders = 5-6 real CAP transactions."

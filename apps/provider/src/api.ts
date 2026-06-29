@@ -355,9 +355,42 @@ app.get("/api/evidence", (_req, res) => {
       agentStoreListings[name] = `https://agent.croo.network/agents/${id.trim()}`;
     });
 
+    // Build live requirements checklist
+    const hasAgentListings = Object.keys(agentStoreListings).length >= 4; // capguard + 3 candidates
+    const has10Orders = stats.completed_jobs >= 10;
+    const has3Counterparties = stats.unique_counterparties >= 3;
+    const has5Buyers = stats.unique_buyer_wallets >= 5;
+    const hasReportHashes = reportHashes.length > 0;
+    const hasVerifyUrls = verifyUrls.length > 0;
+
+    const liveRequirements = {
+      has_agent_listings: hasAgentListings,
+      has_10_orders: has10Orders,
+      has_3_counterparties: has3Counterparties,
+      has_5_buyers: has5Buyers,
+      has_report_hashes: hasReportHashes,
+      has_verify_urls: hasVerifyUrls,
+    };
+
+    const missingRequirements: string[] = [];
+    if (!hasAgentListings) missingRequirements.push(`Need 4 Agent Store listings — CAPGuard + 3 candidates (currently: ${Object.keys(agentStoreListings).length})`);
+    if (!has10Orders) missingRequirements.push(`Need 10+ completed jobs (currently: ${stats.completed_jobs})`);
+    if (!has3Counterparties) missingRequirements.push(`Need 3+ unique counterparty agents (currently: ${stats.unique_counterparties})`);
+    if (!has5Buyers) missingRequirements.push(`Need 5+ unique buyer wallets (currently: ${stats.unique_buyer_wallets})`);
+    if (!hasReportHashes) missingRequirements.push("Need at least 1 completed evaluation with a report hash");
+
+    const evidenceStatus = missingRequirements.length === 0 ? "ready" : "incomplete";
+
+    // Build absolute verify URLs if public base URL is set
+    const publicBaseUrl = process.env.PUBLIC_PROVIDER_URL || process.env.DASHBOARD_PUBLIC_URL || "";
+    const absoluteVerifyUrls = verifyUrls.map((u) => publicBaseUrl ? `${publicBaseUrl}${u}` : u);
+
     res.json({
       generated_at: new Date().toISOString(),
       mode: process.env.STRICT_CAP_MODE === "true" ? "STRICT_CAP" : process.env.DEMO_MODE === "true" ? "DEMO" : "DEFAULT",
+      evidence_status: evidenceStatus,
+      missing_requirements: missingRequirements,
+      live_requirements: liveRequirements,
       agent_store_listings: agentStoreListings,
       architecture: {
         a2a_depth: 4,
@@ -376,7 +409,7 @@ app.get("/api/evidence", (_req, res) => {
         unique_buyer_wallets: stats.unique_buyer_wallets,
       },
       report_hashes: reportHashes.slice(0, 10),
-      verify_urls: verifyUrls.slice(0, 10),
+      verify_urls: absoluteVerifyUrls.slice(0, 10),
       sla_guard_examples: slaGuardExamples.slice(0, 5),
       cross_validation_examples: crossValidationExamples.slice(0, 5),
       consensus_examples: consensusExamples.slice(0, 5),
@@ -397,6 +430,20 @@ app.get("/api/evidence", (_req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// ─── Health Endpoint ─────────────────────────────────────────────────────────
+// Quick uptime + connection status check for monitoring
+
+app.get("/api/health", (_req, res) => {
+  res.json({
+    status: "ok",
+    uptime_seconds: Math.floor(process.uptime()),
+    mode: process.env.STRICT_CAP_MODE === "true" ? "STRICT_CAP" : process.env.DEMO_MODE === "true" ? "DEMO" : "DEFAULT",
+    timestamp: new Date().toISOString(),
+    version: "1.0.0",
+  });
+});
+
 
 export function startApiServer(port: number = 3001) {
   app.listen(port, () => {

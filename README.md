@@ -1,6 +1,6 @@
 # CAPGuard TrustRouter
 
-> **Before you hire an agent on CROO, CAPGuard hires them first — on your behalf, with real paid CAP orders. Every routing recommendation is backed by paid A2A evidence, delivery proofs, and cryptographic report verification.**
+> **CAPGuard TrustRouter is the only agent on CROO that evaluates candidates through real paid sub-orders — and withholds routing from those that fail.** Every recommendation is backed by on-chain A2A evidence across 4 levels of composability, not just metadata or static reports.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![CROO Agent Store](https://img.shields.io/badge/CROO-Agent%20Store-lime)](https://agent.croo.network)
@@ -9,19 +9,18 @@
 
 ---
 
-## Why CAPGuard is Different
+## Why CAPGuard Wins
 
-| Dimension | Trust Lab | VeriVerse | MantleAgents | **CAPGuard TrustRouter** |
-|---|---|---|---|---|
-| Method | Static audit | IPFS proof | On-chain registry | **Active paid A2A testing** |
-| Evidence | Trust Card | IPFS hash | ERC-8004 NFT | **Real CAP order receipts** |
-| A2A Depth | 1 level | 1 level | 1 level | **4 levels** |
-| Cross-Validation | ❌ | ❌ | ❌ | **✅ Runner-up verifies winner** |
-| On-Chain Proof | ❌ | ✅ IPFS | ✅ Mantle | **✅ Base (native to CROO)** |
-| Route-and-Execute | ❌ | ❌ | ❌ | **✅ Auto-route to winner** |
-| Agent Reputation | ✅ Trust Card | ✅ Basic | ✅ ERC-8004 | **✅ Historical score + grade** |
-| MCP Integration | ❌ | ❌ | ❌ | **✅ 2 MCP tools** |
-| Real CAP Chain | ✅ Partial | ❌ | ❌ | **✅ Full lifecycle** |
+| Feature | Trust Lab | CAP Sentinel | ProofMesh | BNB Scorer | **CAPGuard TrustRouter** |
+|---------|-----------|-------------|-----------|------------|-------------|
+| A2A Depth | 1 | 1 | 2 | 2 | **4 levels** |
+| Conditional Pay | ❌ | ❌ | ❌ | ❌ | **✅ 4-gate SLA** |
+| Consensus Scoring | ❌ | ❌ | ❌ | ❌ | **✅ Jaccard** |
+| Cross-Validation | ❌ | ❌ | ❌ | ❌ | **✅ L4 runner-up** |
+| MCP Callable | ❌ | ❌ | ❌ | ❌ | **✅ 2 tools** |
+| Evidence Endpoint | ❌ | ❌ | ❌ | ❌ | **✅ /api/evidence** |
+| On-Chain Proof | ❌ | ✅ IPFS | Partial | ❌ | **✅ Optional Base** |
+| Judge-verifiable | Partial | Partial | Partial | Partial | **Full** |
 
 ---
 
@@ -39,11 +38,12 @@
   │  1. Accept buyer order via CAP              │
   │  2. Fan-out paid sub-orders to N agents     │  Level 2
   │  3. Score deliveries (6-dimension matrix)   │
-  │  4. Select winner by trust score            │
-  │  5. Route-and-execute to winner             │  Level 3
-  │  6. Cross-validate via runner-up            │  Level 4 ← UNIQUE
-  │  7. Anchor proof on Base chain              │
-  │  8. Deliver trust report + proof hashes     │
+  │  4. SLA Gate: block agents below threshold  │  ← SLA-Gated Routing
+  │  5. Consensus score across candidates       │  ← Consensus Scoring
+  │  6. Route-and-execute to winner             │  Level 3
+  │  7. Cross-validate via runner-up            │  Level 4 ← UNIQUE
+  │  8. Anchor proof on Base chain (optional)   │
+  │  9. Deliver trust report + proof hashes     │
   └─────────────────────────────────────────────┘
            │            │            │
            ▼            ▼            ▼
@@ -53,6 +53,8 @@
            └──────┬─────┘            │
                   ▼                  │
           Score & Compare ◄──────────┘
+                  │
+                  ▼ SLA Gate (min score 80, schema, proof, sla)
                   │
            ┌──────┴───────┐
            ▼              ▼
@@ -64,7 +66,7 @@
          Trust Report + SHA-256 Hashes
                   │
                   ▼
-         ⛓️ Anchored on Base
+         ⛓️ Base anchoring (when configured)
 ```
 
 **A2A Depth — 4 Levels:**
@@ -75,23 +77,50 @@
 
 ---
 
+## CROO Native Alignment
+
+CAPGuard uses the **full CAP lifecycle** in both provider and requester roles simultaneously:
+
+| Role | CAP Methods Used | Purpose |
+|------|-----------------|---------|
+| **Provider** | `connectWebSocket`, `acceptNegotiation`, `deliverOrder` | Accept buyer trust evaluation orders |
+| **Requester** | `negotiateOrder`, `payOrder`, `getDelivery`, `listOrders` | Create paid sub-orders to candidate agents |
+| **Event-Driven** | WebSocket → `NegotiationCreated`, `OrderPaid`, `OrderCompleted` | Real-time order lifecycle monitoring |
+| **MCP Provider** | 2 tools: `evaluate_agents`, `verify_report` | Callable from Claude Desktop / Cursor / agy |
+
+> CAPGuard is both **provider AND requester** on CROO — the only agent that operates in both roles simultaneously within a single order flow. This is pure A2A composability.
+
+---
+
 ## Features
 
 ### ✅ Real CAP Lifecycle
 Event-driven WebSocket architecture. Listens for `NegotiationCreated`, `OrderPaid`, `OrderCompleted`. Full state machine: negotiate → pay → wait → deliver.
+
+### ✅ SLA-Gated Safe Routing (Unique)
+CAPGuard only routes execution to agents that pass **all 4 gates**:
+1. `score ≥ MIN_ROUTE_SCORE` (default: 80)
+2. `schema_valid = true`
+3. `proof_present = true`
+4. `sla_passed = true`
+
+Agents that fail any gate are **blocked from routing** and listed in `sla_guard.blocked_agents[]` with reasons. This is routing control — not escrow.
+
+### ✅ Consensus Scoring (Unique)
+After all candidates respond, CAPGuard measures agreement across deliveries using **Jaccard keyword similarity**. Returns `agreement_score` (0–100), outlier detection, and `majority_summary`. No LLM required.
 
 ### ✅ Strict vs Demo Mode
 - `STRICT_CAP_MODE=true` — no simulation fallback, real orders only. For final judging.
 - `DEMO_MODE=true` — simulation allowed with explicit logging. For development.
 
 ### ✅ Route-and-Execute (Level 3)
-Set `auto_route: true` in your buyer request. CAPGuard creates a second-stage order to the winning agent and delivers the final result — all in one flow.
+Set `auto_route: true` in your buyer request. CAPGuard creates a second-stage order to the winning agent (only if it passes the SLA gate) and delivers the final result — all in one flow.
 
-### ✅ Cross-Validation (Level 4 A2A — Unique)
-After routing to the winner, CAPGuard hires the **runner-up** via a fresh paid CAP order to independently verify the winner's delivery. This creates a true agent-to-agent trust chain and produces a `cross_validation` object in every report with `validation_score` (0–100) and `validation_summary`.
+### ✅ Cross-Validation (Level 4 A2A)
+After routing to the winner, CAPGuard hires the **runner-up** via a fresh paid CAP order to independently verify the winner's delivery. Creates a true agent-to-agent trust chain with `validation_score` (0–100) in every report.
 
-### ✅ On-Chain Proof Anchoring
-Every trust report hash is designed to be anchored on **Base chain** (native to CROO). The `on_chain_proof` object in each report includes `tx_hash`, `block_number`, and `contract_address`. Configure via `PROOF_CONTRACT_ADDRESS` + `PROOF_SIGNER_PRIVATE_KEY`.
+### ✅ Optional Base Proof Anchoring
+Every trust report hash can be anchored on **Base chain**. Configure via `PROOF_CONTRACT_ADDRESS` + `PROOF_SIGNER_PRIVATE_KEY`. When not configured, `anchored=false` with a transparent note — no fake tx_hash ever generated.
 
 ### ✅ Agent Reputation System
 Historical trust scores accumulate per agent. Access via:
@@ -99,20 +128,19 @@ Historical trust scores accumulate per agent. Access via:
 GET /api/reputation/:service_id   — single agent history
 GET /api/reputation               — all agents leaderboard
 ```
-Each reputation entry includes: `average_score`, `grade` (A+/A/B+/B/C/D/F), `completion_rate`, `sla_compliance_rate`, `score_history`, and `source_inclusion_rate`.
+Each entry includes: `average_score`, `grade` (A+/A/B+/B/C/D/F), `completion_rate`, `sla_compliance_rate`, `score_history`.
 
 ### ✅ Public Proof Verification
 Every trust report has a `report_hash` (SHA-256). Anyone can verify:
 ```
 GET /api/verify/:report_hash
 ```
-Returns whether hashes match, order IDs, cross-validation result, on-chain proof, and verification notes.
 
-### ✅ A2A Depth Info
+### ✅ Evidence Endpoint (Judge-facing)
 ```
-GET /api/a2a-depth
+GET /api/evidence
 ```
-Returns a machine-readable description of all 4 A2A levels, CAP methods used, and proof types.
+Returns: `evidence_status`, `missing_requirements`, `live_requirements` checklist, agent store listings, all report hashes, verify URLs, SLA gate examples, consensus examples, cross-validation examples.
 
 ### ✅ MCP Integration
 Use CAPGuard from Claude Desktop, Cursor, or agy:
@@ -160,7 +188,7 @@ npm run dev           # Start provider (port 3001) + dashboard (port 3000)
 | `connectWebSocket` | Real-time CAP event listening |
 | `acceptNegotiation` | Accept incoming buyer requests |
 | `negotiateOrder` | Create sub-orders to candidate agents |
-| `payOrder` | Pay for sub-orders |
+| `payOrder` | Pay for sub-orders (SLA-gated — only if candidate passes) |
 | `deliverOrder` | Deliver trust report to buyer |
 | `getDelivery` | Retrieve candidate deliveries |
 | `listOrders` | Query order history for event correlation |
@@ -182,6 +210,12 @@ trust_score =
 ```
 
 All boolean values mapped to 0 or 100, weighted, normalized to 0–100.
+
+**SLA Gate Thresholds (configurable via env):**
+- `MIN_ROUTE_SCORE=80` — minimum score to be routed
+- `REQUIRE_SCHEMA_VALID_FOR_ROUTE=true`
+- `REQUIRE_PROOF_FOR_ROUTE=true`
+- `REQUIRE_SLA_FOR_ROUTE=true`
 
 ---
 
@@ -231,6 +265,10 @@ Available tools:
 capguard-trustrouter/
 ├── apps/
 │   ├── dashboard/          # Next.js 15 + Tailwind — visual dashboard
+│   │   └── src/app/
+│   │       ├── page.tsx         # Main dashboard
+│   │       ├── evidence/        # Judge evidence page (/evidence)
+│   │       └── jobs/            # Job detail pages
 │   ├── provider/           # CAP provider runtime + orchestrator + API
 │   ├── mock-agents/        # Dev-only simulated candidate agents
 │   └── mcp-server/         # MCP server for Claude/Cursor/agy integration
@@ -246,9 +284,10 @@ capguard-trustrouter/
 │   └── smoke-auto-route.ts
 ├── docs/
 │   ├── architecture.md
-│   ├── demo-script.md
-│   ├── live-evidence.md    # Fill before submission
-│   ├── submission-copy.md  # DoraHacks copy ready to paste
+│   ├── demo-script.md          # 5-min demo script (updated)
+│   ├── live-evidence.md        # Fill before submission
+│   ├── final-submit-checklist.md  # Pre-submit safety checklist
+│   ├── submission-copy.md      # DoraHacks copy ready to paste
 │   ├── anti-sybil-checklist.md
 │   └── deploy-candidate-agents.md
 ├── mcp-config.example.json
@@ -269,6 +308,7 @@ capguard-trustrouter/
 ## Live Evidence
 
 See [`docs/live-evidence.md`](docs/live-evidence.md) for full evidence tracking.
+See live evidence dashboard: `/evidence` (when provider is running).
 
 > ⚠️ Mock agents in `apps/mock-agents/` are for **local development only**. Final judging uses live CROO Agent Store services with separate SDK keys.
 
@@ -280,6 +320,9 @@ See [`docs/live-evidence.md`](docs/live-evidence.md) for full evidence tracking.
 - [ ] Demo video recorded (≤ 5 min)
 - [ ] `docs/live-evidence.md` filled with real order IDs
 - [ ] `/api/verify/:hash` publicly accessible
+- [ ] `/evidence` page accessible
+- [ ] `npm run typecheck` passes
+- [ ] No fake tx_hash in any report
 
 ---
 
@@ -291,4 +334,4 @@ MIT — see [LICENSE](LICENSE)
 
 **Built for the [CROO Agent Hackathon 2026](https://dorahacks.io/hackathon/croo-hackathon) · GitHub: [xDzaky/capguard-trustrouter](https://github.com/xDzaky/capguard-trustrouter)**
 
-*One order. Many agents. One verified result.* 🛡️
+*One order. Four levels. One verified result.* 🛡️

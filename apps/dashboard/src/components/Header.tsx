@@ -18,8 +18,17 @@ export function Header() {
 
         {/* Nav */}
         <nav className="hidden md:flex items-center gap-6 text-sm font-medium">
-          <a className="text-brand-dark border-b-2 border-brand-lime pb-1" href="/">
+          <a className="text-gray-500 hover:text-brand-dark transition-colors" href="/">
             Dashboard
+          </a>
+          <a
+            className="text-gray-500 hover:text-brand-dark transition-colors flex items-center gap-1"
+            href="/evidence"
+          >
+            Evidence
+            <span className="text-[9px] font-bold bg-brand-lime text-brand-dark px-1.5 py-0.5 rounded-full uppercase">
+              Judges
+            </span>
           </a>
           <a
             className="text-gray-500 hover:text-brand-dark transition-colors"
@@ -30,6 +39,7 @@ export function Header() {
             Agent Store
           </a>
         </nav>
+
       </div>
 
       <div className="flex items-center gap-4">
