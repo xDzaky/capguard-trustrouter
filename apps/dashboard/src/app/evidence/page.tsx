@@ -138,9 +138,12 @@ export default function EvidencePage() {
 
   useEffect(() => {
     fetch(`${API_URL}/api/evidence`)
-      .then((r) => r.json())
-      .then((d) => { setData(d); setLoading(false); })
-      .catch((e) => { setError(e.message); setLoading(false); });
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}: ${r.statusText}`);
+        return r.json();
+      })
+      .then((d: EvidenceData) => { setData(d); setLoading(false); })
+      .catch((e: Error) => { setError(e.message); setLoading(false); });
   }, []);
 
   if (loading) {
@@ -167,7 +170,34 @@ export default function EvidencePage() {
     );
   }
 
-  const lr = data.live_requirements;
+  // Defensive fallback — handles old API responses that may not have all fields yet
+  const lr = data.live_requirements ?? {
+    has_agent_listings: false,
+    has_10_orders: false,
+    has_3_counterparties: false,
+    has_5_buyers: false,
+    has_report_hashes: false,
+    has_verify_urls: false,
+  };
+  const stats = data.stats ?? {
+    total_jobs: 0,
+    completed_jobs: 0,
+    total_sub_orders: 0,
+    total_cap_transactions: 0,
+    average_trust_score: 0,
+    unique_counterparties: 0,
+    unique_buyer_wallets: 0,
+  };
+  const missingReqs = data.missing_requirements ?? [];
+  const reportHashes = data.report_hashes ?? [];
+  const verifyUrls = data.verify_urls ?? [];
+  const slaGuardExamples = data.sla_guard_examples ?? [];
+  const consensusExamples = data.consensus_examples ?? [];
+  const crossValExamples = data.cross_validation_examples ?? [];
+  const onChainExamples = data.on_chain_anchor_examples ?? [];
+  const latestJobs = data.latest_jobs ?? [];
+  const agentListings = data.agent_store_listings ?? {};
+  const arch = data.architecture ?? { a2a_depth: 4, sla_gated_routing: true, consensus_scoring: true, cross_validation: true, on_chain_proof: "when configured" };
 
   return (
     <div className="min-h-screen bg-white">
@@ -201,7 +231,7 @@ export default function EvidencePage() {
       <div className="max-w-7xl mx-auto px-8 py-12 space-y-12">
 
         {/* ── Incomplete Warning ── */}
-        {data.evidence_status === "incomplete" && data.missing_requirements.length > 0 && (
+        {data.evidence_status !== "ready" && missingReqs.length > 0 && (
           <div className="bg-red-50 border border-red-200 rounded-2xl p-6">
             <div className="flex items-start gap-3">
               <span className="text-2xl">🚨</span>
@@ -209,7 +239,7 @@ export default function EvidencePage() {
                 <p className="font-bold text-red-700 mb-2">Evidence Incomplete — Do NOT claim final metrics</p>
                 <p className="text-sm text-red-600 mb-4">Generate real CROO orders before submission. Missing requirements:</p>
                 <ul className="space-y-1">
-                  {data.missing_requirements.map((req, i) => (
+                  {missingReqs.map((req, i) => (
                     <li key={i} className="text-sm text-red-600 flex items-start gap-2">
                       <span className="text-red-400 mt-0.5">•</span> {req}
                     </li>
@@ -245,19 +275,19 @@ export default function EvidencePage() {
           </div>
           <h2 className="text-2xl font-bold text-[#0A0A0A] mb-6">Real Order Metrics</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard label="Total Jobs" value={data.stats.total_jobs} />
-            <StatCard label="Completed Jobs" value={data.stats.completed_jobs} />
-            <StatCard label="CAP Transactions" value={data.stats.total_cap_transactions} />
-            <StatCard label="Avg Trust Score" value={`${data.stats.average_trust_score}/100`} />
-            <StatCard label="Sub-Orders" value={data.stats.total_sub_orders} />
-            <StatCard label="Unique Buyers" value={data.stats.unique_buyer_wallets} sub="min 5 required" />
-            <StatCard label="Counterparties" value={data.stats.unique_counterparties} sub="min 3 required" />
-            <StatCard label="A2A Depth" value={`${data.architecture.a2a_depth} Levels`} />
+            <StatCard label="Total Jobs" value={stats.total_jobs} />
+            <StatCard label="Completed Jobs" value={stats.completed_jobs} />
+            <StatCard label="CAP Transactions" value={stats.total_cap_transactions} />
+            <StatCard label="Avg Trust Score" value={`${stats.average_trust_score}/100`} />
+            <StatCard label="Sub-Orders" value={stats.total_sub_orders} />
+            <StatCard label="Unique Buyers" value={stats.unique_buyer_wallets} sub="min 5 required" />
+            <StatCard label="Counterparties" value={stats.unique_counterparties} sub="min 3 required" />
+            <StatCard label="A2A Depth" value={`${arch.a2a_depth} Levels`} />
           </div>
         </section>
 
         {/* ── Agent Store Listings ── */}
-        {Object.keys(data.agent_store_listings).length > 0 && (
+        {Object.keys(agentListings).length > 0 && (
           <section>
             <div className="flex items-center gap-2 mb-2">
               <span className="w-4 h-0.5 bg-[#A3FF12]" />
@@ -265,7 +295,7 @@ export default function EvidencePage() {
             </div>
             <h2 className="text-2xl font-bold text-[#0A0A0A] mb-6">Live Listings</h2>
             <div className="bg-white border border-gray-100 rounded-2xl p-6 space-y-3">
-              {Object.entries(data.agent_store_listings).map(([name, url]) => (
+              {Object.entries(agentListings).map(([name, url]) => (
                 <div key={name} className="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
                   <span className="font-mono text-sm text-gray-700 capitalize">{name}</span>
                   <a
@@ -291,10 +321,10 @@ export default function EvidencePage() {
           <h2 className="text-2xl font-bold text-[#0A0A0A] mb-6">4-Level A2A Features</h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: "SLA-Gated Routing", active: data.architecture.sla_gated_routing, icon: "🚦" },
-              { label: "Consensus Scoring", active: data.architecture.consensus_scoring, icon: "🤝" },
-              { label: "Cross-Validation", active: data.architecture.cross_validation, icon: "🔄" },
-              { label: "On-Chain Proof", active: data.architecture.on_chain_proof.includes("when"), icon: "⛓️" },
+              { label: "SLA-Gated Routing", active: arch.sla_gated_routing, icon: "🚦" },
+              { label: "Consensus Scoring", active: arch.consensus_scoring, icon: "🤝" },
+              { label: "Cross-Validation", active: arch.cross_validation, icon: "🔄" },
+              { label: "On-Chain Proof", active: (arch.on_chain_proof ?? "").includes("when"), icon: "⛓️" },
             ].map(({ label, active, icon }) => (
               <div key={label} className="bg-white border border-gray-100 rounded-2xl p-5 text-center">
                 <p className="text-2xl mb-2">{icon}</p>
@@ -315,20 +345,20 @@ export default function EvidencePage() {
           </div>
           <h2 className="text-2xl font-bold text-[#0A0A0A] mb-6">Report Hashes & Verify URLs</h2>
           <div className="bg-white border border-gray-100 rounded-2xl p-6">
-            {data.report_hashes.length === 0 ? (
+            {reportHashes.length === 0 ? (
               <p className="text-sm text-gray-400 font-mono text-center py-4">
                 No report hashes yet — run real evaluations to generate
               </p>
             ) : (
-              data.report_hashes.map((hash, i) => (
-                <HashRow key={hash} hash={hash} verifyUrl={data.verify_urls[i] ?? `/api/verify/${hash}`} />
+              reportHashes.map((hash, i) => (
+                <HashRow key={hash} hash={hash} verifyUrl={verifyUrls[i] ?? `/api/verify/${hash}`} />
               ))
             )}
           </div>
         </section>
 
         {/* ── SLA Guard Examples ── */}
-        {data.sla_guard_examples.length > 0 && (
+        {slaGuardExamples.length > 0 && (
           <section>
             <div className="flex items-center gap-2 mb-2">
               <span className="w-4 h-0.5 bg-[#A3FF12]" />
@@ -336,7 +366,7 @@ export default function EvidencePage() {
             </div>
             <h2 className="text-2xl font-bold text-[#0A0A0A] mb-6">Routing Gate Examples</h2>
             <div className="space-y-4">
-              {data.sla_guard_examples.map((ex: any, i: number) => (
+              {slaGuardExamples.map((ex: any, i: number) => (
                 <div key={i} className="bg-white border border-gray-100 rounded-2xl p-6">
                   <div className="flex items-center justify-between mb-4">
                     <span className="font-mono text-xs text-gray-400">{ex.job_id}</span>
@@ -347,12 +377,12 @@ export default function EvidencePage() {
                     </div>
                   </div>
                   <div className="space-y-2">
-                    {ex.blocked_agents?.map((a: any, j: number) => (
+                    {(ex.blocked_agents ?? []).map((a: any, j: number) => (
                       <div key={j} className="flex items-start gap-3 bg-red-50 rounded-xl p-3">
                         <span className="text-red-500 text-sm flex-shrink-0">🚦</span>
                         <div>
                           <p className="text-sm font-bold text-red-700">{a.agent_name} — BLOCKED</p>
-                          <p className="text-xs text-red-500 font-mono mt-0.5">{a.reasons.join(", ")}</p>
+                          <p className="text-xs text-red-500 font-mono mt-0.5">{(a.reasons ?? []).join(", ")}</p>
                         </div>
                       </div>
                     ))}
@@ -364,7 +394,7 @@ export default function EvidencePage() {
         )}
 
         {/* ── Consensus Examples ── */}
-        {data.consensus_examples.length > 0 && (
+        {consensusExamples.length > 0 && (
           <section>
             <div className="flex items-center gap-2 mb-2">
               <span className="w-4 h-0.5 bg-[#A3FF12]" />
@@ -372,7 +402,7 @@ export default function EvidencePage() {
             </div>
             <h2 className="text-2xl font-bold text-[#0A0A0A] mb-6">Agreement Scoring Examples</h2>
             <div className="space-y-4">
-              {data.consensus_examples.map((ex: any, i: number) => (
+              {consensusExamples.map((ex: any, i: number) => (
                 <div key={i} className="bg-white border border-gray-100 rounded-2xl p-6">
                   <div className="flex items-center justify-between mb-3">
                     <span className="font-mono text-xs text-gray-400">{ex.job_id}</span>
@@ -394,7 +424,7 @@ export default function EvidencePage() {
         )}
 
         {/* ── Cross-Validation Examples ── */}
-        {data.cross_validation_examples.length > 0 && (
+        {crossValExamples.length > 0 && (
           <section>
             <div className="flex items-center gap-2 mb-2">
               <span className="w-4 h-0.5 bg-[#A3FF12]" />
@@ -402,7 +432,7 @@ export default function EvidencePage() {
             </div>
             <h2 className="text-2xl font-bold text-[#0A0A0A] mb-6">Cross-Validation Examples</h2>
             <div className="space-y-4">
-              {data.cross_validation_examples.map((ex: any, i: number) => (
+              {crossValExamples.map((ex: any, i: number) => (
                 <div key={i} className="bg-white border border-gray-100 rounded-2xl p-6">
                   <div className="flex items-center justify-between">
                     <div>
@@ -422,7 +452,7 @@ export default function EvidencePage() {
         )}
 
         {/* ── Latest Jobs ── */}
-        {data.latest_jobs.length > 0 && (
+        {latestJobs.length > 0 && (
           <section>
             <div className="flex items-center gap-2 mb-2">
               <span className="w-4 h-0.5 bg-[#A3FF12]" />
@@ -441,7 +471,7 @@ export default function EvidencePage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.latest_jobs.map((job) => (
+                  {latestJobs.map((job) => (
                     <tr key={job.job_id} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                       <td className="px-6 py-4 font-mono text-xs text-gray-500">
                         <a href={`/jobs/${job.job_id}`} className="hover:text-[#0A0A0A] transition-colors">
@@ -472,7 +502,7 @@ export default function EvidencePage() {
         )}
 
         {/* ── On-Chain Anchor ── */}
-        {data.on_chain_anchor_examples.length > 0 && (
+        {onChainExamples.length > 0 && (
           <section>
             <div className="flex items-center gap-2 mb-2">
               <span className="w-4 h-0.5 bg-[#A3FF12]" />
@@ -480,7 +510,7 @@ export default function EvidencePage() {
             </div>
             <h2 className="text-2xl font-bold text-[#0A0A0A] mb-6">Base Chain Anchors</h2>
             <div className="space-y-3">
-              {data.on_chain_anchor_examples.map((ex: any, i: number) => (
+              {onChainExamples.map((ex: any, i: number) => (
                 <div key={i} className="bg-white border border-gray-100 rounded-2xl p-5 flex items-center justify-between gap-4">
                   <div>
                     <p className="font-mono text-xs text-gray-400 mb-1">{ex.job_id}</p>
