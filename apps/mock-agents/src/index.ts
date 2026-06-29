@@ -93,44 +93,53 @@ async function startCandidateAgents() {
 
       const client = new AgentClient(config, agent.sdkKey);
 
-      await client.connectWebSocket();
+      const stream = await client.connectWebSocket();
+      const EventType = SDK.EventType || SDK.default?.EventType;
+      const DeliverableType = SDK.DeliverableType || SDK.default?.DeliverableType;
 
-      // Listen for incoming negotiation requests
-      client.on("NegotiationCreated", async (event: any) => {
-        logger.info(`📥 ${agent.name} received negotiation: ${event?.negotiationId}`);
-        try {
-          await client.acceptNegotiation(event.negotiationId);
-          logger.info(`✅ ${agent.name} accepted negotiation ${event?.negotiationId}`);
-        } catch (e: any) {
-          logger.error(`❌ ${agent.name} acceptNegotiation failed: ${e.message}`);
-        }
-      });
+      if (EventType && stream) {
+        // Accept incoming negotiation requests
+        stream.on(EventType.NegotiationCreated, async (event: any) => {
+          const negId = event?.negotiation_id || event?.negotiationId;
+          logger.info(`📥 ${agent.name} received negotiation: ${negId}`);
+          try {
+            await client.acceptNegotiation(negId);
+            logger.info(`✅ ${agent.name} accepted negotiation ${negId}`);
+          } catch (e: any) {
+            logger.error(`❌ ${agent.name} acceptNegotiation failed: ${e.message}`);
+          }
+        });
 
-      // Listen for order created (after buyer pays)
-      client.on("OrderCreated", async (event: any) => {
-        const orderId = event?.orderId || event?.order_id || event?.id;
-        if (!orderId) return;
-        logger.info(`📦 ${agent.name} fulfilling order ${orderId}`);
+        // Fulfill the order once buyer pays
+        stream.on(EventType.OrderPaid, async (event: any) => {
+          const orderId = event?.order_id || event?.orderId;
+          if (!orderId) return;
+          logger.info(`📦 ${agent.name} fulfilling order ${orderId}`);
 
-        try {
-          // Simulate processing time
-          await new Promise((r) => setTimeout(r, agent.delayMs));
+          try {
+            await new Promise((r) => setTimeout(r, agent.delayMs));
 
-          const delivery = agent.generateResponse(
-            event?.requirements?.task || event?.intent || "Agent evaluation task"
-          );
+            const delivery = agent.generateResponse(
+              event?.requirements?.task || event?.intent || "Agent evaluation task"
+            );
 
-          await client.deliverOrder(orderId, {
-            deliverableText: JSON.stringify(delivery),
-          });
+            await client.deliverOrder(orderId, {
+              deliverableType: DeliverableType?.Text || "text",
+              deliverableText: JSON.stringify(delivery),
+            });
 
-          logger.info(`🚀 ${agent.name} delivered order ${orderId}`);
-        } catch (e: any) {
-          logger.error(`❌ ${agent.name} deliverOrder failed: ${e.message}`);
-        }
-      });
+            logger.info(`🚀 ${agent.name} delivered order ${orderId}`);
+          } catch (e: any) {
+            logger.error(`❌ ${agent.name} deliverOrder failed: ${e.message}`);
+          }
+        });
 
-      logger.info(`✅ ${agent.name} — ONLINE and listening for orders`);
+        logger.info(`✅ ${agent.name} — ONLINE and listening for orders`);
+      } else {
+        // Fallback: stream exists but EventType not available
+        logger.warn(`⚠️  ${agent.name} — connected but EventType not found, limited mode`);
+        logger.info(`✅ ${agent.name} — ONLINE (limited mode)`);
+      }
     } catch (e: any) {
       logger.error(`❌ ${agent.name} failed to start: ${e.message}`);
     }
