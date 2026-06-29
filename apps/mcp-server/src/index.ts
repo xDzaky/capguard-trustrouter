@@ -82,7 +82,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
 
 // ─── Tool Handlers ────────────────────────────────────────────────────────────
 
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
   const { name, arguments: args } = request.params;
 
   if (name === "evaluate_agents") {
