@@ -1,33 +1,27 @@
-// ─── Mock Agents for Demo & Testing ─────────────────────────────────────────
-// These simple agents simulate candidate providers for TrustRouter to evaluate.
-// Each mock agent responds with different quality levels to test scoring.
+// ─── Candidate Agents Server ──────────────────────────────────────────────────
+// Runs ResearchAlpha, VerifyBeta, FormatGamma as real CROO providers.
+// Each agent connects with its own SDK key and responds to incoming CAP orders.
 
+import "dotenv/config";
 import "dotenv/config";
 
 const logger = {
-  info: (...args: any[]) => console.log("[mock-agents]", ...args),
-  warn: (...args: any[]) => console.warn("[mock-agents]", ...args),
-  error: (...args: any[]) => console.error("[mock-agents]", ...args),
+  info: (...args: any[]) => console.log("[candidate-agents]", ...args),
+  warn: (...args: any[]) => console.warn("[candidate-agents]", ...args),
+  error: (...args: any[]) => console.error("[candidate-agents]", ...args),
 };
 
-// ─── Mock Agent Definitions ─────────────────────────────────────────────────
+// ─── Agent Configurations ───────────────────────────────────────────────────
 
-interface MockAgent {
-  id: string;
-  name: string;
-  quality: "high" | "medium" | "low";
-  delayMs: number;
-  generateResponse: (intent: string) => any;
-}
-
-const mockAgents: MockAgent[] = [
+const AGENT_CONFIGS = [
   {
-    id: "svc_research_alpha",
     name: "ResearchAlpha",
-    quality: "high",
+    sdkKey: process.env.CROO_SDK_KEY_RESEARCH_ALPHA || "",
+    serviceId: "b22eafc9-5950-4b8d-b726-4c7dde7fccfb",
+    quality: "high" as const,
     delayMs: 3000,
     generateResponse: (intent: string) => ({
-      content: `# Research Analysis: ${intent}\n\n## Executive Summary\nComprehensive analysis based on multiple verified sources.\n\n## Key Findings\n1. Market analysis shows significant growth potential\n2. Technical architecture is well-designed and scalable\n3. Competitive landscape favors early movers\n\n## Data Sources\n- CoinGecko API data (verified)\n- DeFiLlama TVL metrics\n- GitHub repository analysis\n- On-chain transaction analysis\n\n## Conclusion\nBased on thorough analysis across multiple dimensions, the subject shows strong fundamentals with verified data backing.`,
+      content: `# Research Analysis: ${intent}\n\n## Executive Summary\nComprehensive analysis based on multiple verified sources.\n\n## Key Findings\n1. Market analysis shows significant growth potential\n2. Technical architecture is well-designed and scalable\n3. Competitive landscape favors early movers\n\n## Data Sources\n- CoinGecko API data (verified)\n- DeFiLlama TVL metrics\n- GitHub repository analysis\n- On-chain transaction analysis\n\n## Conclusion\nBased on thorough analysis, subject shows strong fundamentals with verified data backing.`,
       sources: [
         "https://api.coingecko.com/v3/global",
         "https://defillama.com/protocol",
@@ -35,85 +29,123 @@ const mockAgents: MockAgent[] = [
         "https://etherscan.io/address/0x",
       ],
       confidence: 0.92,
-      metadata: {
-        model: "research-alpha-v2",
-        processing_time_ms: 2800,
-        sources_verified: 4,
-      },
+      metadata: { model: "research-alpha-v2", sources_verified: 4 },
     }),
   },
   {
-    id: "svc_verify_beta",
     name: "VerifyBeta",
-    quality: "medium",
+    sdkKey: process.env.CROO_SDK_KEY_VERIFY_BETA || "",
+    serviceId: "ff6e532e-1d75-4048-8264-843ced684217",
+    quality: "medium" as const,
     delayMs: 4500,
     generateResponse: (intent: string) => ({
       content: `## Verification Report for: ${intent}\n\n### Source Validation\n- Primary sources checked: 2/3 verified\n- Secondary sources: 1/2 verified\n\n### Fact Check Results\n- Claim accuracy: 78%\n- Data freshness: Within 24h\n\n### Notes\nSome sources could not be independently verified due to API rate limits.`,
       sources: ["https://api.coingecko.com", "https://defillama.com"],
       confidence: 0.78,
-      metadata: {
-        model: "verify-beta-v1",
-        processing_time_ms: 4200,
-        sources_verified: 2,
-      },
+      metadata: { model: "verify-beta-v1", sources_verified: 2 },
     }),
   },
   {
-    id: "svc_format_gamma",
     name: "FormatGamma",
-    quality: "low",
-    delayMs: 8000,
+    sdkKey: process.env.CROO_SDK_KEY_FORMAT_GAMMA || "",
+    serviceId: "e1b28d69-c7f0-43bc-99df-29649a342aeb",
+    quality: "low" as const,
+    delayMs: 6000,
     generateResponse: (intent: string) => ({
-      content: `Formatted output for: ${intent}. Basic analysis completed.`,
-      // No sources - tests scoring penalty
+      content: `Formatted output for: ${intent}. Basic analysis completed with structure applied.`,
+      sources: [],
       confidence: 0.45,
+      metadata: { model: "format-gamma-v1" },
     }),
   },
 ];
 
-// ─── Mock Agent Runner ──────────────────────────────────────────────────────
+// ─── Start Each Candidate Agent ──────────────────────────────────────────────
 
-async function startMockAgents() {
+async function startCandidateAgents() {
   logger.info("═══════════════════════════════════════════════════════════════");
-  logger.info("  🤖 Mock Candidate Agents — Starting...");
+  logger.info("  🤖 Candidate Agents — Starting with real CROO SDK keys...");
   logger.info("═══════════════════════════════════════════════════════════════");
 
-  const apiKey = process.env.CROO_SDK_KEY_PROVIDER;
+  let SDK: any;
+  try {
+    SDK = await import("@croo-network/sdk");
+  } catch (e) {
+    logger.error("Failed to import @croo-network/sdk:", e);
+    process.exit(1);
+  }
 
-  for (const agent of mockAgents) {
-    logger.info(`  📦 ${agent.name} (${agent.id}) — Quality: ${agent.quality}, Delay: ${agent.delayMs}ms`);
+  const AgentClient = SDK.AgentClient || SDK.default?.AgentClient || SDK.default;
 
-    // Try to register with CROO SDK
-    if (apiKey) {
-      try {
-        const SDK = await import("@croo-network/sdk");
-        const AgentClient = SDK.AgentClient || SDK.default?.AgentClient || SDK.default;
+  for (const agent of AGENT_CONFIGS) {
+    if (!agent.sdkKey) {
+      logger.warn(`⚠️  ${agent.name}: SDK key missing — skipping`);
+      continue;
+    }
 
-        if (AgentClient) {
-          // In production, each mock agent would have its own API key
-          // For demo, we use the same key and differentiate by service ID
-          logger.info(`  ✅ ${agent.name} would connect to CROO (shared key mode)`);
+    try {
+      logger.info(`🔗 Connecting ${agent.name} (service: ${agent.serviceId})`);
+
+      const client = new AgentClient({
+        apiKey: agent.sdkKey,
+        baseURL: process.env.CROO_API_URL || "https://api.croo.network",
+        wsURL: process.env.CROO_WS_URL || "wss://api.croo.network/ws",
+      });
+
+      await client.connectWebSocket();
+
+      // Listen for incoming negotiation requests
+      client.on("NegotiationCreated", async (event: any) => {
+        logger.info(`📥 ${agent.name} received negotiation: ${event?.negotiationId}`);
+        try {
+          await client.acceptNegotiation(event.negotiationId);
+          logger.info(`✅ ${agent.name} accepted negotiation ${event?.negotiationId}`);
+        } catch (e: any) {
+          logger.error(`❌ ${agent.name} acceptNegotiation failed: ${e.message}`);
         }
-      } catch {
-        logger.warn(`  ⚠️ ${agent.name} running in standalone mode (SDK not available)`);
-      }
+      });
+
+      // Listen for order created (after buyer pays)
+      client.on("OrderCreated", async (event: any) => {
+        const orderId = event?.orderId || event?.order_id || event?.id;
+        if (!orderId) return;
+        logger.info(`📦 ${agent.name} fulfilling order ${orderId}`);
+
+        try {
+          // Simulate processing time
+          await new Promise((r) => setTimeout(r, agent.delayMs));
+
+          const delivery = agent.generateResponse(
+            event?.requirements?.task || event?.intent || "Agent evaluation task"
+          );
+
+          await client.deliverOrder(orderId, {
+            deliverableText: JSON.stringify(delivery),
+          });
+
+          logger.info(`🚀 ${agent.name} delivered order ${orderId}`);
+        } catch (e: any) {
+          logger.error(`❌ ${agent.name} deliverOrder failed: ${e.message}`);
+        }
+      });
+
+      logger.info(`✅ ${agent.name} — ONLINE and listening for orders`);
+    } catch (e: any) {
+      logger.error(`❌ ${agent.name} failed to start: ${e.message}`);
     }
   }
 
   logger.info("═══════════════════════════════════════════════════════════════");
-  logger.info("  🤖 Mock agents are ready for trust evaluation");
-  logger.info("  💡 These agents are called by the TrustRouter orchestrator");
+  logger.info("  🤖 All candidate agents running — waiting for orders...");
   logger.info("═══════════════════════════════════════════════════════════════");
 
-  // Keep process alive
+  // Keep alive
   setInterval(() => {
-    // Heartbeat
-  }, 30000);
+    logger.info("💓 Candidate agents heartbeat — still running");
+  }, 60000);
 }
 
-// Export for use by orchestrator
-export { mockAgents };
-export type { MockAgent };
-
-// Run if called directly
-startMockAgents().catch(console.error);
+startCandidateAgents().catch((e) => {
+  logger.error("Fatal:", e.message);
+  process.exit(1);
+});
