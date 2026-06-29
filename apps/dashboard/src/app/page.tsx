@@ -11,7 +11,7 @@ export default async function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-white">
-      <Header />
+      <Header activePage="dashboard" contextLabel="TRUSTROUTER" />
 
       <main className="max-w-7xl mx-auto px-8 py-12">
         {/* Hero Stats */}
