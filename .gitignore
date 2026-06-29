@@ -30,3 +30,5 @@ npm-debug.log*
 
 # Coverage
 coverage/
+data/*.db-shm
+data/*.db-wal
